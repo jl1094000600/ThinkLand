@@ -106,6 +106,7 @@
     <!-- ── DEMO MODAL ──────────────────────────────────────────── -->
     <Teleport to="body">
       <div v-if="demoVisible" class="demo-modal" @click.self="closeDemo">
+        <div class="demo-backdrop"></div>
         <div class="demo-card">
 
           <div class="demo-header">
