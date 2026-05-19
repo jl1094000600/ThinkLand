@@ -52,16 +52,19 @@ class ChatMessage(BaseModel):
 
 class GenerateRequest(BaseModel):
     idea: str | None = Field(default=None, max_length=6000)
+    conversation_id: int | None = None
     messages: list[ChatMessage] = Field(default_factory=list, max_length=30)
 
 
 class GenerateResponse(BaseModel):
+    conversation_id: int
     result: dict
     usage: dict
     points: PointOut
 
 
 class ConfirmConversationRequest(BaseModel):
+    conversation_id: int | None = None
     messages: list[ChatMessage] = Field(min_length=1, max_length=60)
     prd: list[str] = Field(default_factory=list, max_length=20)
     flow: list[str] = Field(default_factory=list, max_length=20)
@@ -71,3 +74,42 @@ class ConfirmConversationRequest(BaseModel):
 class ConfirmConversationResponse(BaseModel):
     saved: bool
     record_id: int
+
+
+class CommunityPublishRequest(BaseModel):
+    conversation_id: int | None = None
+    item_type: str = Field(pattern="^(prd|project)$")
+    title: str = Field(min_length=1, max_length=191)
+    summary: str = Field(default="", max_length=1200)
+    prd: list[str] = Field(default_factory=list, max_length=40)
+    flow: list[str] = Field(default_factory=list, max_length=40)
+    tasks: list[str] = Field(default_factory=list, max_length=40)
+    project_url: HttpUrl | None = None
+
+
+class CommunityOwnerOut(BaseModel):
+    id: int
+    account: str
+
+
+class CommunityItemOut(BaseModel):
+    id: int
+    item_type: str
+    title: str
+    summary: str
+    content: dict
+    project_url: str | None
+    star_count: int
+    starred_by_me: bool
+    owner: CommunityOwnerOut
+    created_at: str
+
+
+class CommunityListResponse(BaseModel):
+    items: list[CommunityItemOut]
+
+
+class CommunityStarResponse(BaseModel):
+    item_id: int
+    starred: bool
+    star_count: int

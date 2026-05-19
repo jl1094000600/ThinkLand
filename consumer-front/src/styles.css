@@ -609,6 +609,9 @@ p {
 
 .auth-card input,
 .settings-card input,
+.publish-panel input,
+.publish-panel select,
+.publish-panel textarea,
 .composer-panel textarea {
   width: 100%;
   border: 1px solid rgba(99, 89, 133, 0.18);
@@ -617,7 +620,9 @@ p {
 }
 
 .auth-card input,
-.settings-card input {
+.settings-card input,
+.publish-panel input,
+.publish-panel select {
   height: 62px;
   padding: 0 18px;
   border-radius: 18px;
@@ -691,6 +696,11 @@ p {
   color: #ffffff;
 }
 
+.sidebar-nav {
+  display: grid;
+  gap: 10px;
+}
+
 .brand.compact {
   margin-bottom: 26px;
 }
@@ -713,6 +723,30 @@ p {
 .side-link:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
+}
+
+.sidebar-user {
+  display: grid;
+  gap: 6px;
+  margin-top: auto;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-user span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user strong {
+  color: #ffffff;
+  font-size: 15px;
 }
 
 .workspace-main {
@@ -812,7 +846,9 @@ p {
 }
 
 .chat-shell,
-.result-page {
+.result-page,
+.community-page,
+.publish-panel {
   border: 1px solid rgba(114, 98, 166, 0.18);
   background: rgba(255, 255, 255, 0.68);
   box-shadow: 0 24px 70px rgba(65, 49, 105, 0.1);
@@ -821,8 +857,13 @@ p {
 
 .chat-board {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 86px;
+  grid-template-columns: minmax(0, 1fr) 46px;
   gap: 16px;
+  transition: grid-template-columns 0.18s ease;
+}
+
+.chat-board:has(.memory-rail:hover) {
+  grid-template-columns: minmax(0, 1fr) 280px;
 }
 
 .chat-list {
@@ -879,15 +920,22 @@ p {
   grid-template-rows: auto 1fr;
   justify-items: center;
   min-height: 360px;
+  overflow: visible;
   padding: 8px 0 18px;
   border-left: 1px solid rgba(99, 89, 133, 0.12);
 }
 
-.memory-rail p {
+.memory-label {
   margin: 0 0 10px;
   color: #736a83;
   font-size: 13px;
   font-weight: 900;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.memory-rail:hover .memory-label {
+  opacity: 1;
 }
 
 .memory-line {
@@ -916,15 +964,42 @@ p {
 .memory-dot {
   position: relative;
   z-index: 1;
-  display: grid;
+  display: flex;
   width: 30px;
   height: 30px;
-  place-items: center;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   border: 3px solid #ffffff;
   border-radius: 50%;
   background: #6740f2;
   color: #ffffff;
   box-shadow: 0 10px 20px rgba(103, 64, 242, 0.2);
+  transition: width 0.16s ease, border-radius 0.16s ease, justify-content 0.16s ease;
+}
+
+.memory-dot em {
+  display: none;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.2;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-rail:hover .memory-dot {
+  width: 230px;
+  justify-content: flex-start;
+  padding: 0 10px;
+  border-radius: 999px;
+}
+
+.memory-rail:hover .memory-dot em {
+  display: block;
 }
 
 .memory-dot.assistant {
@@ -996,6 +1071,7 @@ p {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 14px;
   margin-bottom: 18px;
 }
 
@@ -1011,6 +1087,28 @@ p {
   background: #eee9fb;
   color: #6740f2;
   font-size: 13px;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.publish-mini,
+.refresh-button,
+.star-button,
+.community-tabs button {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-weight: 900;
+}
+
+.publish-mini,
+.refresh-button {
+  background: #171426;
+  color: #ffffff;
 }
 
 .prd-panel ul {
@@ -1100,6 +1198,142 @@ p {
   color: #332c48;
 }
 
+.community-page {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border-radius: 24px;
+}
+
+.community-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.community-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(238, 233, 251, 0.9);
+}
+
+.community-tabs button {
+  background: transparent;
+  color: #625b72;
+}
+
+.community-tabs button.active {
+  background: #ffffff;
+  color: #171426;
+  box-shadow: 0 10px 24px rgba(65, 49, 105, 0.1);
+}
+
+.publish-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 20px;
+  box-shadow: none;
+}
+
+.publish-grid {
+  display: grid;
+  grid-template-columns: 0.7fr 1.2fr 1.2fr;
+  gap: 12px;
+}
+
+.publish-panel label {
+  display: grid;
+  gap: 8px;
+  color: #5d5768;
+  font-weight: 800;
+}
+
+.publish-panel textarea {
+  min-height: 84px;
+  resize: vertical;
+  padding: 14px 16px;
+  border-radius: 18px;
+  color: #2f2940;
+}
+
+.community-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.community-card {
+  display: grid;
+  gap: 14px;
+  min-height: 260px;
+  padding: 18px;
+  border: 1px solid rgba(114, 98, 166, 0.18);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.community-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.community-card-top span {
+  color: #6740f2;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.star-button {
+  border: 1px solid rgba(87, 70, 139, 0.16);
+  background: #ffffff;
+  color: #332c48;
+}
+
+.star-button.active {
+  border-color: rgba(103, 64, 242, 0.24);
+  background: #eee9fb;
+  color: #6740f2;
+}
+
+.community-card h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.community-card p,
+.community-card small {
+  margin: 0;
+  color: #625b72;
+}
+
+.project-link {
+  width: fit-content;
+  color: #6740f2;
+  font-weight: 900;
+}
+
+.community-preview {
+  display: grid;
+  gap: 8px;
+}
+
+.community-preview span {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(246, 244, 251, 0.9);
+  color: #4f485f;
+  font-size: 14px;
+  font-weight: 700;
+}
+
 @keyframes floatCard {
   0%,
   100% {
@@ -1168,7 +1402,9 @@ p {
   .motion-section,
   .auth-content,
   .workspace-grid,
-  .task-list {
+  .task-list,
+  .community-grid,
+  .publish-grid {
     grid-template-columns: 1fr;
   }
 

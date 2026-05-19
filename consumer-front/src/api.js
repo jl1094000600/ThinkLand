@@ -26,7 +26,7 @@ export async function apiRequest(path, options = {}) {
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
     const message = data.detail || '请求失败，请稍后重试'
-    throw new Error(Array.isArray(message) ? message.map((item) => item.msg).join('；') : message)
+    throw new Error(Array.isArray(message) ? message.map((item) => item.msg).join('，') : message)
   }
   return data
 }
@@ -56,10 +56,10 @@ export async function saveAIConfig(config) {
   })
 }
 
-export async function generatePlan(messages) {
+export async function generatePlan(messages, conversationId = null) {
   return apiRequest('/api/generate', {
     method: 'POST',
-    body: JSON.stringify({ messages })
+    body: JSON.stringify({ messages, conversation_id: conversationId })
   })
 }
 
@@ -67,5 +67,22 @@ export async function confirmConversation(payload) {
   return apiRequest('/api/conversations/confirm', {
     method: 'POST',
     body: JSON.stringify(payload)
+  })
+}
+
+export async function listCommunityItems(itemType = 'all') {
+  return apiRequest(`/api/community/items?item_type=${encodeURIComponent(itemType)}`)
+}
+
+export async function publishCommunityItem(payload) {
+  return apiRequest('/api/community/items', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function toggleCommunityStar(itemId) {
+  return apiRequest(`/api/community/items/${itemId}/star`, {
+    method: 'POST'
   })
 }
