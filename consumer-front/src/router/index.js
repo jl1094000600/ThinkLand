@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '@/views/HomeView.vue'
 import AuthView from '@/views/AuthView.vue'
 import WorkspaceView from '@/views/WorkspaceView.vue'
+import { getToken } from '@/api'
 
 const routes = [
   { path: '/', name: 'home', component: HomeView },
@@ -23,9 +24,10 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  if (to.meta.requiresAuth && localStorage.getItem('consumer-auth') !== '1') {
+  if (to.meta.requiresAuth && !getToken()) {
     return { name: 'login' }
   }
 })
 
 export default router
+
