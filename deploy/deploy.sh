@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-/www/thinkland/ThinkLand}"
-BRANCH="${DEPLOY_BRANCH:-main}"
+BRANCH="${DEPLOY_BRANCH:-master}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-thinkland-backend}"
 
 echo "==> Deploy ThinkLand"
