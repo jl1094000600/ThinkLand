@@ -1552,12 +1552,21 @@ h1, h2, h3, p { margin-top: 0; }
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(23, 20, 38, 0.7);
-  backdrop-filter: blur(10px);
   animation: fadeSlide 0.25s ease both;
 }
 
+.demo-modal::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(23, 20, 38, 0.62);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
 .demo-card {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: auto 1fr auto;
   width: min(900px, 100%);
