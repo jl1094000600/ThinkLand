@@ -17,7 +17,7 @@
 
       <section v-if="user" class="sidebar-user">
         <span>{{ user.account }}</span>
-        <strong>剩余 {{ points?.remaining_points ?? '--' }} / {{ points?.granted_points ?? 100 }} 点</strong>
+        <strong>{{ points?.remaining_points ?? '--' }} / {{ points?.granted_points ?? 100 }} 点</strong>
       </section>
     </aside>
 
@@ -226,6 +226,42 @@
     </div>
   </main>
 </template>
+
+<style scoped>
+.chat-message span {
+  color: var(--ink-muted, #4f485f);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.chat-message p {
+  margin: 0;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(237, 232, 219, 0.8);
+  color: var(--ink-soft, #2f2940);
+  font-size: 16px;
+  line-height: 1.65;
+  transition: outline 0.15s;
+}
+
+.chat-message.user p {
+  background: var(--ink, #171426);
+  color: #fdfaf5;
+}
+
+.chat-message.assistant p {
+  background: rgba(255, 252, 245, 0.96);
+  border: 1px solid rgba(103, 86, 75, 0.1);
+}
+
+.chat-message.focused p {
+  outline: 3px solid rgba(196, 98, 45, 0.2);
+  outline-offset: 2px;
+}
+</style>
 
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
