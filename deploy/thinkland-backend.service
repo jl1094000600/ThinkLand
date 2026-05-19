@@ -6,9 +6,9 @@ After=network.target mysql.service
 Type=simple
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/www/thinkland/consumer-backend
-EnvironmentFile=/www/thinkland/consumer-backend/.env
-ExecStart=/www/thinkland/consumer-backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
+WorkingDirectory=/www/thinkland/ThinkLand/consumer-backend
+EnvironmentFile=/www/thinkland/ThinkLand/consumer-backend/.env
+ExecStart=/www/thinkland/ThinkLand/consumer-backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
 Restart=always
 RestartSec=5
 

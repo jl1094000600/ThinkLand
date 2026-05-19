@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-APP_DIR="${APP_DIR:-/www/thinkland}"
+APP_DIR="${APP_DIR:-/www/thinkland/ThinkLand}"
 BRANCH="${DEPLOY_BRANCH:-main}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-thinkland-backend}"
 

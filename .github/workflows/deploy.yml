@@ -28,4 +28,4 @@ jobs:
           ssh-keyscan -p "$SERVER_PORT" "$SERVER_HOST" >> ~/.ssh/known_hosts
 
           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
-            "cd /www/thinkland && bash deploy/deploy.sh"
+            "cd /www/thinkland/ThinkLand && bash deploy/deploy.sh"
