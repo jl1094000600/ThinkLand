@@ -5,37 +5,43 @@
         <img class="brand-logo" src="/think-land-logo.svg" alt="Think Land logo" />
         <strong>Think Land</strong>
       </RouterLink>
-      <div class="nav-links">
-        <a href="#product">产品</a>
-        <a href="#motion">演示</a>
-        <a href="#notice">说明</a>
+      <div class="nav-actions">
+        <div class="nav-links">
+          <a href="#product">产品</a>
+          <a href="#motion">演示</a>
+          <a href="#notice">说明</a>
+        </div>
+        <RouterLink class="nav-cta" to="/login">开始使用</RouterLink>
       </div>
-      <RouterLink class="nav-cta" to="/login">开始使用</RouterLink>
     </nav>
 
     <section class="hero">
       <div class="hero-scene" aria-hidden="true">
         <div class="scene-grid"></div>
-        <div class="prd-window">
-          <div class="window-top">
-            <span></span><span></span><span></span>
+        <div class="tech-vortex">
+          <div class="vortex-disc">
+            <span class="disc-ring ring-one"></span>
+            <span class="disc-ring ring-two"></span>
+            <span class="disc-ring ring-three"></span>
+            <span class="vortex-curve curve-one"></span>
+            <span class="vortex-curve curve-two"></span>
+            <span class="vortex-curve curve-three"></span>
+            <span class="vortex-arc arc-one"></span>
+            <span class="vortex-arc arc-two"></span>
           </div>
-          <p class="voice-line">"帮我做一个面向个人创作者的 AI 项目助手"</p>
-          <div class="typing-card">
-            <span>正在生成 PRD</span>
-            <strong>产品目标 / 用户旅程 / 核心功能 / 里程碑</strong>
+          <div class="cube-lock" aria-label="榫卯结构代码主体">
+            <span class="cube cube-a"></span>
+            <span class="cube cube-b"></span>
+            <span class="cube cube-c"></span>
+            <span class="cube cube-d"></span>
+            <span class="cube cube-e"></span>
+            <span class="cube cube-f"></span>
+            <span class="cube cube-g"></span>
           </div>
-        </div>
-        <div class="flow-window">
-          <div class="flow-node node-a">想法</div>
-          <div class="flow-node node-b">PRD</div>
-          <div class="flow-node node-c">流程图</div>
-          <div class="flow-node node-d">任务</div>
-          <svg viewBox="0 0 500 280" role="img" aria-label="流程图动画">
-            <path class="flow-line line-one" d="M92 96 C170 64 210 74 250 116" />
-            <path class="flow-line line-two" d="M276 142 C334 176 354 188 408 178" />
-            <path class="flow-line line-three" d="M244 152 C208 198 178 222 124 222" />
-          </svg>
+          <div class="vortex-caption">
+            <span>AI PRODUCT ENGINE</span>
+            <strong>PRD · FLOW · CODE</strong>
+          </div>
         </div>
       </div>
 
@@ -45,7 +51,6 @@
           Think Land 面向个人创作者、独立开发者和小团队，把需求梳理、PRD 生成、流程图规划和任务拆解放进一个轻量工作台。
         </p>
         <div class="hero-actions">
-          <RouterLink class="primary-btn" to="/login">开始使用</RouterLink>
           <button class="secondary-btn" @click="openDemo">查看生成动画</button>
         </div>
       </div>
@@ -53,7 +58,6 @@
 
     <section id="product" class="intro-section">
       <div>
-        <p class="eyebrow">网站介绍</p>
         <h2>它不是聊天框，而是帮你把想法往前推的产品搭子。</h2>
       </div>
       <div class="intro-grid">

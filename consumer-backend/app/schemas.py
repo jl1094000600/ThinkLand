@@ -84,6 +84,21 @@ class ConfirmConversationRequest(BaseModel):
 class ConfirmConversationResponse(BaseModel):
     saved: bool
     record_id: int
+    conversation_id: int
+
+
+class PrdItemOut(BaseModel):
+    id: int
+    title: str
+    summary: str
+    prd: list[str]
+    flow: list[str]
+    tasks: list[str]
+    updated_at: str
+
+
+class PrdListResponse(BaseModel):
+    items: list[PrdItemOut]
 
 
 class CommunityPublishRequest(BaseModel):

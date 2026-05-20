@@ -13,12 +13,14 @@
         <button class="side-link" :class="{ active: activeView === 'tasks' }" @click="activeView = 'tasks'">任务计划</button>
         <button class="side-link" :class="{ active: activeView === 'community' }" @click="activeView = 'community'">创意社区</button>
         <button class="side-link" :class="{ active: activeView === 'code' }" @click="activeView = 'code'">代码生成</button>
-        <button class="side-link" @click="logout">退出登录</button>
       </nav>
 
       <section v-if="user" class="sidebar-user">
-        <span>{{ user.account }}</span>
-        <strong>{{ points?.remaining_points ?? '--' }} / {{ points?.granted_points ?? 100 }} 点</strong>
+        <div>
+          <span>{{ user.account }}</span>
+          <strong>{{ points?.remaining_points ?? '--' }} / {{ points?.granted_points ?? 100 }} 点</strong>
+        </div>
+        <button class="sidebar-logout" type="button" @click="logout">退出登录</button>
       </section>
     </aside>
 
@@ -204,6 +206,18 @@
               <b>{{ codeJob?.status || '未开始' }}</b>
             </div>
             <label>
+              选择 PRD
+              <select v-model="selectedPrdId" @change="applySelectedPrdToCodeForm">
+                <option value="">请选择已保存的 PRD</option>
+                <option v-for="item in prdItems" :key="item.id" :value="String(item.id)">{{ item.title }}</option>
+              </select>
+            </label>
+            <div v-if="selectedPrd" class="prd-select-preview">
+              <strong>{{ selectedPrd.summary }}</strong>
+              <span>{{ selectedPrd.prd.length }} 条 PRD · {{ selectedPrd.flow.length }} 个流程节点 · {{ selectedPrd.tasks.length }} 个任务</span>
+            </div>
+            <p v-else class="codegen-hint">代码生成会严格绑定一个已确认保存的 PRD。请先在创意工作台确认需求，或在这里选择历史 PRD。</p>
+            <label>
               项目名称
               <input v-model.trim="codeForm.title" placeholder="例如：AI 学习计划助手" />
             </label>
@@ -241,7 +255,7 @@
               <span>预计 {{ codeJob?.estimated_tokens || 0 }} token</span>
               <strong>{{ codeJob?.provider_type === 'platform' ? `扣点 ${codeJob?.actual_points || codeJob?.estimated_points || 0}` : '自有模型不扣点' }}</strong>
             </div>
-            <button type="submit" :disabled="codeGenerating || !codeForm.title || !codeForm.target_description">
+            <button type="submit" :disabled="codeGenerating || !selectedPrdId || !codeForm.title || !codeForm.target_description">
               {{ codeGenerating ? '生成中...' : '开始生成代码' }}
             </button>
           </form>
@@ -391,6 +405,7 @@ import {
   getGitHubConfig,
   getMe,
   listCommunityItems,
+  listPrds,
   publishCommunityItem,
   pushCodeGenerationToGitHub,
   saveAIConfig,
@@ -433,6 +448,8 @@ const messages = ref([
 const prd = ref([])
 const flow = ref([])
 const tasks = ref([])
+const prdItems = ref([])
+const selectedPrdId = ref('')
 const communityFilter = ref('all')
 const communityItems = ref([])
 const publishForm = ref({ item_type: 'prd', title: '', summary: '', project_url: '' })
@@ -479,15 +496,20 @@ const canPublishCommunity = computed(() => {
   return prd.value.length > 0
 })
 
+const selectedPrd = computed(() => prdItems.value.find((item) => String(item.id) === String(selectedPrdId.value)) || null)
+
 onMounted(async () => {
   await loadProfile()
   await loadGitHubConfig()
   await loadStackRegistry()
+  await loadPrds()
 })
 
 watch(activeView, (value) => {
   if (value === 'community' && !communityItems.value.length) loadCommunity()
-  if (value === 'code') fillCodeDraft()
+  if (value === 'code') {
+    loadPrds().then(fillCodeDraft)
+  }
 })
 
 async function loadProfile() {
@@ -521,6 +543,21 @@ async function loadStackRegistry() {
     stackRegistry.value = await getCodeGenerationStackRegistry()
   } catch {
     // Keep built-in options available if the registry endpoint is temporarily unavailable.
+  }
+}
+
+async function loadPrds() {
+  try {
+    const response = await listPrds()
+    prdItems.value = response.items || []
+    if (!selectedPrdId.value && conversationId.value && prdItems.value.some((item) => item.id === conversationId.value)) {
+      selectedPrdId.value = String(conversationId.value)
+    }
+    if (!selectedPrdId.value && prdItems.value.length) {
+      selectedPrdId.value = String(prdItems.value[0].id)
+    }
+  } catch {
+    prdItems.value = []
   }
 }
 
@@ -596,6 +633,9 @@ async function confirmRequirement() {
   try {
     const response = await confirmConversation({ messages: messages.value, conversation_id: conversationId.value, prd: prd.value, flow: flow.value, tasks: tasks.value })
     saveMessage.value = `需求已保存，记录编号 #${response.record_id}`
+    conversationId.value = response.conversation_id
+    selectedPrdId.value = String(response.conversation_id)
+    await loadPrds()
     fillPublishDraft()
     fillCodeDraft()
   } catch (err) {
@@ -670,6 +710,7 @@ async function starCommunityItem(item) {
 }
 
 function fillCodeDraft() {
+  applySelectedPrdToCodeForm()
   const firstUserMessage = messages.value.find((message) => message.role === 'user')?.content || ''
   if (!codeForm.value.title) codeForm.value.title = firstUserMessage.slice(0, 32) || publishForm.value.title || '未命名项目'
   if (!codeForm.value.target_description) {
@@ -677,13 +718,28 @@ function fillCodeDraft() {
   }
 }
 
+function applySelectedPrdToCodeForm() {
+  const item = selectedPrd.value
+  if (!item) return
+  codeForm.value.title = codeForm.value.title || item.title || '未命名项目'
+  codeForm.value.target_description = [
+    ...item.prd.map((line) => `PRD：${line}`),
+    ...item.flow.map((line) => `流程：${line}`),
+    ...item.tasks.map((line) => `任务：${line}`)
+  ].join('\n')
+}
+
 async function startCodeGeneration() {
+  if (!selectedPrdId.value) {
+    codeError.value = '请先选择一个已保存的 PRD'
+    return
+  }
   codeGenerating.value = true
   codeError.value = ''
   codeMessage.value = ''
   codeEvents.value = []
   try {
-    const job = await createCodeGenerationJob({ ...codeForm.value, conversation_id: conversationId.value })
+    const job = await createCodeGenerationJob({ ...codeForm.value, conversation_id: Number(selectedPrdId.value) })
     applyCodeJob(job)
     await streamCodeGenerationEvents(job.id, (event) => {
       if (event.status) return

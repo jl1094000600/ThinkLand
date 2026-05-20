@@ -50,6 +50,7 @@ from .schemas import (
     GenerateRequest,
     GenerateResponse,
     MeResponse,
+    PrdListResponse,
 )
 from .security import create_access_token, decrypt_api_key, encrypt_api_key, get_current_user, hash_password, verify_password
 
@@ -227,6 +228,23 @@ def code_job_out(db: Session, job: CodeGenerationJob) -> dict:
         "files": [code_file_out(file) for file in files],
         "graph_nodes": [code_node_out(node) for node in nodes],
         "graph_edges": [code_edge_out(edge) for edge in edges],
+    }
+
+
+def prd_item_out(conversation: Conversation) -> dict:
+    result = conversation.result_json or {}
+    prd = result.get("prd") or []
+    flow = result.get("flow") or []
+    tasks = result.get("tasks") or []
+    summary_source = prd or tasks or flow or [conversation.title]
+    return {
+        "id": conversation.id,
+        "title": conversation.title,
+        "summary": str(summary_source[0])[:160],
+        "prd": prd,
+        "flow": flow,
+        "tasks": tasks,
+        "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
     }
 
 
@@ -695,7 +713,17 @@ def confirm_conversation(
     db.add(record)
     db.commit()
     db.refresh(record)
-    return {"saved": True, "record_id": record.id}
+    return {"saved": True, "record_id": record.id, "conversation_id": conversation.id}
+
+
+@app.get("/api/prds", response_model=PrdListResponse)
+def list_prds(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    conversations = db.scalars(
+        select(Conversation)
+        .where(Conversation.user_id == current_user.id, Conversation.status == "confirmed")
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+    ).all()
+    return {"items": [prd_item_out(conversation) for conversation in conversations if (conversation.result_json or {}).get("prd")]}
 
 
 @app.get("/api/code-generation/stack-registry")
@@ -709,20 +737,39 @@ def create_code_generation_job(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
-    conversation = None
-    if payload.conversation_id:
-        conversation = db.scalar(select(Conversation).where(Conversation.id == payload.conversation_id, Conversation.user_id == current_user.id))
-        if conversation is None:
-            raise HTTPException(status_code=404, detail="Conversation not found")
+    if not payload.conversation_id:
+        raise HTTPException(status_code=422, detail="Please choose a saved PRD before generating code")
+    conversation = db.scalar(select(Conversation).where(Conversation.id == payload.conversation_id, Conversation.user_id == current_user.id))
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.status != "confirmed":
+        raise HTTPException(status_code=409, detail="Please confirm and save this PRD before generating code")
+    result = conversation.result_json or {}
+    prd_lines = result.get("prd") or []
+    if not prd_lines:
+        raise HTTPException(status_code=422, detail="Selected PRD has no PRD content")
 
     provider_type = current_user.ai_config.provider_type if current_user.ai_config else "custom"
     charge_points = provider_type == "platform"
     stack = payload.stack.model_dump()
+    linked_target = "\n".join(
+        [
+            f"选择的 PRD：{conversation.title}",
+            "PRD：",
+            *[f"- {item}" for item in prd_lines],
+            "流程：",
+            *[f"- {item}" for item in (result.get("flow") or [])],
+            "任务：",
+            *[f"- {item}" for item in (result.get("tasks") or [])],
+            "补充生成目标：",
+            payload.target_description.strip(),
+        ]
+    )
     job = CodeGenerationJob(
         user_id=current_user.id,
-        conversation_id=conversation.id if conversation else None,
+        conversation_id=conversation.id,
         title=payload.title.strip(),
-        target_description=payload.target_description.strip(),
+        target_description=linked_target,
         stack_json=stack,
         status="planning",
         provider_type=provider_type,

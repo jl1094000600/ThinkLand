@@ -70,6 +70,10 @@ export async function confirmConversation(payload) {
   })
 }
 
+export async function listPrds() {
+  return apiRequest('/api/prds')
+}
+
 export async function listCommunityItems(itemType = 'all') {
   return apiRequest(`/api/community/items?item_type=${encodeURIComponent(itemType)}`)
 }
