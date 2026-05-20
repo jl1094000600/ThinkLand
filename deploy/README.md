@@ -34,6 +34,16 @@ cp .env.example .env
 nano .env
 ```
 
+如果要开放“平台提供模型”，服务器 `.env` 还需要配置：
+
+```env
+PLATFORM_AI_BASE_URL=https://api.openai.com/v1
+PLATFORM_AI_API_KEY=你的平台模型服务商Key
+PLATFORM_AI_MODEL=gpt-4o-mini
+```
+
+用户选择平台模型时会扣点；用户选择自有模型时使用自己的 API Key，不扣点。
+
 MySQL 建议给部署用户配置 `~/.my.cnf`，这样 `deploy/deploy.sh` 可以直接执行 SQL：
 
 ```ini

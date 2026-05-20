@@ -1,9 +1,8 @@
-import { dirname, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-const rootDir = dirname(fileURLToPath(import.meta.url))
+const rootDir = process.cwd()
 const localModules = resolve(rootDir, 'node_modules')
 
 export default defineConfig({

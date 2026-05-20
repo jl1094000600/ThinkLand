@@ -30,6 +30,9 @@ class Settings(BaseModel):
     api_key_encryption_key: str
     access_token_expire_minutes: int = 10080
     openai_compat_timeout_seconds: int = 90
+    platform_ai_base_url: str | None = None
+    platform_ai_api_key: str | None = None
+    platform_ai_model: str | None = None
 
 
 @lru_cache
@@ -41,4 +44,7 @@ def get_settings() -> Settings:
         api_key_encryption_key=require_env("API_KEY_ENCRYPTION_KEY"),
         access_token_expire_minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "10080")),
         openai_compat_timeout_seconds=int(os.getenv("OPENAI_COMPAT_TIMEOUT_SECONDS", "90")),
+        platform_ai_base_url=os.getenv("PLATFORM_AI_BASE_URL"),
+        platform_ai_api_key=os.getenv("PLATFORM_AI_API_KEY"),
+        platform_ai_model=os.getenv("PLATFORM_AI_MODEL"),
     )

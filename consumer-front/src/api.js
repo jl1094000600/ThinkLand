@@ -86,3 +86,64 @@ export async function toggleCommunityStar(itemId) {
     method: 'POST'
   })
 }
+
+export async function saveGitHubToken(config) {
+  return apiRequest('/api/me/github-token', {
+    method: 'PUT',
+    body: JSON.stringify(config)
+  })
+}
+
+export async function getGitHubConfig() {
+  return apiRequest('/api/me/github-config')
+}
+
+export async function getCodeGenerationStackRegistry() {
+  return apiRequest('/api/code-generation/stack-registry')
+}
+
+export async function createCodeGenerationJob(payload) {
+  return apiRequest('/api/code-generation/jobs', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function getCodeGenerationJob(jobId) {
+  return apiRequest(`/api/code-generation/jobs/${jobId}`)
+}
+
+export async function pushCodeGenerationToGitHub(jobId, payload) {
+  return apiRequest(`/api/code-generation/jobs/${jobId}/push-github`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function streamCodeGenerationEvents(jobId, onEvent) {
+  const token = getToken()
+  const response = await fetch(`/api/code-generation/jobs/${jobId}/events`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
+  })
+  if (!response.ok || !response.body) {
+    throw new Error('代码生成事件连接失败')
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    buffer += decoder.decode(value, { stream: true })
+    const chunks = buffer.split('\n\n')
+    buffer = chunks.pop() || ''
+    for (const chunk of chunks) {
+      const dataLine = chunk.split('\n').find((line) => line.startsWith('data: '))
+      if (dataLine) {
+        onEvent(JSON.parse(dataLine.slice(6)))
+      }
+    }
+  }
+}

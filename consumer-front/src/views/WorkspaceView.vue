@@ -12,6 +12,7 @@
         <button class="side-link" :class="{ active: activeView === 'flow' }" @click="activeView = 'flow'">流程图</button>
         <button class="side-link" :class="{ active: activeView === 'tasks' }" @click="activeView = 'tasks'">任务计划</button>
         <button class="side-link" :class="{ active: activeView === 'community' }" @click="activeView = 'community'">创意社区</button>
+        <button class="side-link" :class="{ active: activeView === 'code' }" @click="activeView = 'code'">代码生成</button>
         <button class="side-link" @click="logout">退出登录</button>
       </nav>
 
@@ -23,9 +24,7 @@
 
     <section class="workspace-main">
       <header class="workspace-header">
-        <div>
-          <h1>{{ pageTitle }}</h1>
-        </div>
+        <h1>{{ pageTitle }}</h1>
         <button class="settings-button" type="button" aria-label="AI 设置" title="AI 设置" @click="showConfig = true">
           <span></span>
         </button>
@@ -131,7 +130,7 @@
         <p v-else class="empty-state">完成需求问答后，任务计划会自动整理到这里。</p>
       </section>
 
-      <section v-else class="community-page">
+      <section v-else-if="activeView === 'community'" class="community-page">
         <div class="community-toolbar">
           <div class="community-tabs" aria-label="社区筛选">
             <button :class="{ active: communityFilter === 'all' }" @click="setCommunityFilter('all')">全部</button>
@@ -182,7 +181,7 @@
           <article v-for="item in communityItems" :key="item.id" class="community-card">
             <div class="community-card-top">
               <span>{{ item.item_type === 'project' ? '上线项目' : '公开 PRD' }}</span>
-              <button class="star-button" :class="{ active: item.starred_by_me }" type="button" :title="item.starred_by_me ? '取消 Star' : 'Star'" @click="starCommunityItem(item)">
+              <button class="star-button" :class="{ active: item.starred_by_me }" type="button" @click="starCommunityItem(item)">
                 {{ item.starred_by_me ? '★' : '☆' }} {{ item.star_count }}
               </button>
             </div>
@@ -196,6 +195,151 @@
           </article>
         </div>
       </section>
+
+      <section v-else class="codegen-page">
+        <div class="codegen-layout">
+          <form class="codegen-panel" @submit.prevent="startCodeGeneration">
+            <div class="panel-title">
+              <span>代码生成</span>
+              <b>{{ codeJob?.status || '未开始' }}</b>
+            </div>
+            <label>
+              项目名称
+              <input v-model.trim="codeForm.title" placeholder="例如：AI 学习计划助手" />
+            </label>
+            <label>
+              生成目标
+              <textarea v-model.trim="codeForm.target_description" placeholder="描述要生成的应用；可直接基于当前 PRD。"></textarea>
+            </label>
+            <div class="codegen-stack-grid">
+              <label>
+                前端
+                <select v-model="codeForm.stack.frontend">
+                  <option v-for="item in stackRegistry.frontend" :key="item.key" :value="item.key">{{ item.label }}</option>
+                </select>
+              </label>
+              <label>
+                后端
+                <select v-model="codeForm.stack.backend">
+                  <option v-for="item in stackRegistry.backend" :key="item.key" :value="item.key">{{ item.label }}</option>
+                </select>
+              </label>
+              <label>
+                数据库
+                <select v-model="codeForm.stack.database">
+                  <option v-for="item in stackRegistry.database" :key="item.key" :value="item.key">{{ item.label }}</option>
+                </select>
+              </label>
+              <label>
+                部署
+                <select v-model="codeForm.stack.deploy">
+                  <option v-for="item in stackRegistry.deploy" :key="item.key" :value="item.key">{{ item.label }}</option>
+                </select>
+              </label>
+            </div>
+            <div class="codegen-meter">
+              <span>预计 {{ codeJob?.estimated_tokens || 0 }} token</span>
+              <strong>{{ codeJob?.provider_type === 'platform' ? `扣点 ${codeJob?.actual_points || codeJob?.estimated_points || 0}` : '自有模型不扣点' }}</strong>
+            </div>
+            <button type="submit" :disabled="codeGenerating || !codeForm.title || !codeForm.target_description">
+              {{ codeGenerating ? '生成中...' : '开始生成代码' }}
+            </button>
+          </form>
+
+          <div class="codegen-graph-panel">
+            <div class="panel-title">
+              <span>代码关系图谱</span>
+              <b>{{ codeNodes.length }} 节点</b>
+            </div>
+            <div class="code-graph">
+              <svg aria-hidden="true">
+                <line
+                  v-for="edge in codeEdges"
+                  :key="`${edge.source}-${edge.target}`"
+                  :x1="nodePosition(edge.source).x"
+                  :y1="nodePosition(edge.source).y"
+                  :x2="nodePosition(edge.target).x"
+                  :y2="nodePosition(edge.target).y"
+                />
+              </svg>
+              <button
+                v-for="node in codeNodes"
+                :key="node.key"
+                class="code-node"
+                :class="{ active: selectedCodeNode?.key === node.key }"
+                :style="{ left: `${nodePosition(node.key).x}px`, top: `${nodePosition(node.key).y}px` }"
+                type="button"
+                @click="selectCodeNode(node)"
+              >
+                <span>{{ node.type }}</span>
+                <strong>{{ node.label }}</strong>
+              </button>
+            </div>
+          </div>
+
+          <aside class="codegen-detail">
+            <div class="panel-title">
+              <span>生成详情</span>
+              <b>{{ codeEvents.length }} 条</b>
+            </div>
+            <div v-if="selectedCodeNode" class="code-node-detail">
+              <strong>{{ selectedCodeNode.label }}</strong>
+              <p>{{ selectedCodeNode.description }}</p>
+              <button v-if="selectedCodeNode.file_path" type="button" @click="selectCodeFile(selectedCodeNode.file_path)">
+                查看 {{ selectedCodeNode.file_path }}
+              </button>
+            </div>
+            <div class="code-event-list">
+              <p v-for="event in codeEvents" :key="event.id || event.sequence_index">{{ event.title }}</p>
+            </div>
+          </aside>
+        </div>
+
+        <div class="code-files-panel">
+          <div class="panel-title">
+            <span>文件预览</span>
+            <b>{{ codeFiles.length }} 个文件</b>
+          </div>
+          <div class="code-file-tabs">
+            <button v-for="file in codeFiles" :key="file.path" type="button" :class="{ active: selectedCodeFile?.path === file.path }" @click="selectedCodeFile = file">
+              {{ file.path }}
+            </button>
+          </div>
+          <p v-if="selectedCodeFile" class="code-file-explain">{{ selectedCodeFile.explanation }}</p>
+          <pre v-if="selectedCodeFile"><code>{{ selectedCodeFile.content }}</code></pre>
+          <p v-else class="empty-state">生成完成后可以在这里查看代码文件。</p>
+        </div>
+
+        <form class="github-panel" @submit.prevent="pushGeneratedCode">
+          <div class="panel-title">
+            <span>推送 GitHub</span>
+            <b>{{ githubConfig?.configured ? '已配置' : '未配置' }}</b>
+          </div>
+          <div class="publish-grid">
+            <label>
+              GitHub PAT
+              <input v-model.trim="githubForm.token" type="password" placeholder="只保存一次，后端加密存储" />
+            </label>
+            <label>
+              仓库
+              <input v-model.trim="githubForm.default_repo" placeholder="owner/repo" />
+            </label>
+            <label>
+              基准分支
+              <input v-model.trim="githubForm.default_branch" placeholder="main 或 master" />
+            </label>
+          </div>
+          <div class="composer-actions">
+            <span>{{ codeJob?.github_url ? `已推送：${codeJob.github_url}` : '默认推送到 thinkland/generated-* 新分支' }}</span>
+            <div class="composer-buttons">
+              <button type="button" class="confirm-button" :disabled="!githubForm.token" @click="saveGitHubSettings">保存 GitHub</button>
+              <button type="submit" :disabled="!codeJob || !githubForm.default_repo || codePushing">{{ codePushing ? '推送中...' : '确认 OK 后推送' }}</button>
+            </div>
+          </div>
+          <p v-if="codeMessage" class="form-success">{{ codeMessage }}</p>
+          <p v-if="codeError" class="form-error">{{ codeError }}</p>
+        </form>
+      </section>
     </section>
 
     <div v-if="showConfig" class="settings-modal" @click.self="showConfig = false">
@@ -205,14 +349,21 @@
           <b>{{ aiConfig?.configured ? '已保存' : '未配置' }}</b>
         </div>
         <label>
+          模型来源
+          <select v-model="configForm.provider_type">
+            <option value="platform">平台提供模型（扣点）</option>
+            <option value="custom">自有模型（不扣点）</option>
+          </select>
+        </label>
+        <label v-if="configForm.provider_type === 'custom'">
           Base URL
           <input v-model.trim="configForm.base_url" placeholder="https://api.openai.com/v1" />
         </label>
         <label>
           模型
-          <input v-model.trim="configForm.model" placeholder="gpt-4o-mini" />
+          <input v-model.trim="configForm.model" :placeholder="configForm.provider_type === 'platform' ? '平台默认模型，例如 gpt-4o-mini' : 'gpt-4o-mini'" />
         </label>
-        <label>
+        <label v-if="configForm.provider_type === 'custom'">
           API Key
           <input v-model.trim="configForm.api_key" type="password" placeholder="保存后将加密存储" />
         </label>
@@ -227,53 +378,24 @@
   </main>
 </template>
 
-<style scoped>
-.chat-message span {
-  color: var(--ink-muted, #4f485f);
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.chat-message p {
-  margin: 0;
-  padding: 16px 18px;
-  border-radius: 18px;
-  background: rgba(237, 232, 219, 0.8);
-  color: var(--ink-soft, #2f2940);
-  font-size: 16px;
-  line-height: 1.65;
-  transition: outline 0.15s;
-}
-
-.chat-message.user p {
-  background: var(--ink, #171426);
-  color: #fdfaf5;
-}
-
-.chat-message.assistant p {
-  background: rgba(255, 252, 245, 0.96);
-  border: 1px solid rgba(103, 86, 75, 0.1);
-}
-
-.chat-message.focused p {
-  outline: 3px solid rgba(196, 98, 45, 0.2);
-  outline-offset: 2px;
-}
-</style>
-
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   clearToken,
   confirmConversation,
+  createCodeGenerationJob,
   generatePlan,
+  getCodeGenerationJob,
+  getCodeGenerationStackRegistry,
+  getGitHubConfig,
   getMe,
   listCommunityItems,
   publishCommunityItem,
+  pushCodeGenerationToGitHub,
   saveAIConfig,
+  saveGitHubToken,
+  streamCodeGenerationEvents,
   toggleCommunityStar
 } from '@/api'
 
@@ -288,16 +410,20 @@ const configSaving = ref(false)
 const savingConversation = ref(false)
 const publishing = ref(false)
 const communityLoading = ref(false)
+const codeGenerating = ref(false)
+const codePushing = ref(false)
 const error = ref('')
 const configMessage = ref('')
 const saveMessage = ref('')
 const communityMessage = ref('')
 const communityError = ref('')
+const codeMessage = ref('')
+const codeError = ref('')
 const draft = ref('')
 const chatListEl = ref(null)
 const conversationId = ref(null)
 const focusedMessageIndex = ref(0)
-const configForm = ref({ base_url: '', model: '', api_key: '' })
+const configForm = ref({ provider_type: 'custom', base_url: '', model: '', api_key: '' })
 const messages = ref([
   {
     role: 'assistant',
@@ -309,12 +435,31 @@ const flow = ref([])
 const tasks = ref([])
 const communityFilter = ref('all')
 const communityItems = ref([])
-const publishForm = ref({
-  item_type: 'prd',
+const publishForm = ref({ item_type: 'prd', title: '', summary: '', project_url: '' })
+const codeForm = ref({
   title: '',
-  summary: '',
-  project_url: ''
+  target_description: '',
+  stack: { frontend: 'vue', backend: 'fastapi', database: 'mysql', deploy: 'ubuntu-nginx' }
 })
+const stackRegistry = ref({
+  frontend: [{ key: 'vue', label: 'Vue' }, { key: 'react', label: 'React' }],
+  backend: [
+    { key: 'fastapi', label: 'Python FastAPI' },
+    { key: 'nestjs', label: 'Node.js NestJS' },
+    { key: 'springboot', label: 'Java Spring Boot' }
+  ],
+  database: [{ key: 'mysql', label: 'MySQL' }, { key: 'postgresql', label: 'PostgreSQL' }],
+  deploy: [{ key: 'ubuntu-nginx', label: 'Ubuntu + Nginx' }, { key: 'docker', label: 'Docker' }]
+})
+const codeJob = ref(null)
+const codeEvents = ref([])
+const codeFiles = ref([])
+const codeNodes = ref([])
+const codeEdges = ref([])
+const selectedCodeFile = ref(null)
+const selectedCodeNode = ref(null)
+const githubConfig = ref(null)
+const githubForm = ref({ token: '', default_repo: '', default_branch: 'main' })
 
 const pageTitle = computed(() => {
   const titles = {
@@ -322,27 +467,27 @@ const pageTitle = computed(() => {
     prd: 'PRD',
     flow: '流程图',
     tasks: '任务计划',
-    community: '创意社区'
+    community: '创意社区',
+    code: '代码生成'
   }
   return titles[activeView.value]
 })
 
 const canPublishCommunity = computed(() => {
-  if (!publishForm.value.title.trim()) {
-    return false
-  }
-  if (publishForm.value.item_type === 'project') {
-    return Boolean(publishForm.value.project_url.trim())
-  }
+  if (!publishForm.value.title.trim()) return false
+  if (publishForm.value.item_type === 'project') return Boolean(publishForm.value.project_url.trim())
   return prd.value.length > 0
 })
 
-onMounted(loadProfile)
+onMounted(async () => {
+  await loadProfile()
+  await loadGitHubConfig()
+  await loadStackRegistry()
+})
 
 watch(activeView, (value) => {
-  if (value === 'community' && !communityItems.value.length) {
-    loadCommunity()
-  }
+  if (value === 'community' && !communityItems.value.length) loadCommunity()
+  if (value === 'code') fillCodeDraft()
 })
 
 async function loadProfile() {
@@ -350,12 +495,32 @@ async function loadProfile() {
     const response = await getMe()
     applyProfile(response)
     if (response.ai_config?.configured) {
+      configForm.value.provider_type = response.ai_config.provider_type || 'custom'
       configForm.value.base_url = response.ai_config.base_url || ''
       configForm.value.model = response.ai_config.model || ''
     }
   } catch (err) {
     clearToken()
     router.push('/login')
+  }
+}
+
+async function loadGitHubConfig() {
+  try {
+    const response = await getGitHubConfig()
+    githubConfig.value = response
+    githubForm.value.default_repo = response.default_repo || ''
+    githubForm.value.default_branch = response.default_branch || 'main'
+  } catch (err) {
+    githubConfig.value = { configured: false }
+  }
+}
+
+async function loadStackRegistry() {
+  try {
+    stackRegistry.value = await getCodeGenerationStackRegistry()
+  } catch {
+    // Keep built-in options available if the registry endpoint is temporarily unavailable.
   }
 }
 
@@ -368,13 +533,19 @@ function applyProfile(response) {
 async function saveConfig() {
   configMessage.value = ''
   error.value = ''
-  if (!configForm.value.base_url || !configForm.value.model || !configForm.value.api_key) {
-    error.value = '请填写 Base URL、模型和 API Key'
+  if (!configForm.value.model || (configForm.value.provider_type === 'custom' && (!configForm.value.base_url || !configForm.value.api_key))) {
+    error.value = '请填写模型；自有模型还需要 Base URL 和 API Key'
     return
   }
   configSaving.value = true
   try {
-    const response = await saveAIConfig(configForm.value)
+    const payload = {
+      provider_type: configForm.value.provider_type,
+      model: configForm.value.model,
+      base_url: configForm.value.provider_type === 'custom' ? configForm.value.base_url : null,
+      api_key: configForm.value.provider_type === 'custom' ? configForm.value.api_key : null
+    }
+    const response = await saveAIConfig(payload)
     applyProfile(response)
     configForm.value.api_key = ''
     configMessage.value = 'AI 配置已保存，API Key 已加密存储'
@@ -388,12 +559,9 @@ async function saveConfig() {
 
 async function sendMessage() {
   const content = draft.value.trim()
-  if (!content || loading.value) {
-    return
-  }
+  if (!content || loading.value) return
   error.value = ''
   saveMessage.value = ''
-  configMessage.value = ''
   draft.value = ''
   messages.value.push({ role: 'user', content })
   focusedMessageIndex.value = messages.value.length - 1
@@ -403,21 +571,15 @@ async function sendMessage() {
     const response = await generatePlan(messages.value, conversationId.value)
     conversationId.value = response.conversation_id
     const result = response.result || {}
-    messages.value.push({
-      role: 'assistant',
-      content: result.assistant_message || '我已经收到，可以继续补充更多细节。'
-    })
+    messages.value.push({ role: 'assistant', content: result.assistant_message || '我已经收到，可以继续补充更多细节。' })
     focusedMessageIndex.value = messages.value.length - 1
     if (Array.isArray(result.prd) && result.prd.length) {
       prd.value = result.prd
       fillPublishDraft()
+      fillCodeDraft()
     }
-    if (Array.isArray(result.flow) && result.flow.length) {
-      flow.value = result.flow
-    }
-    if (Array.isArray(result.tasks) && result.tasks.length) {
-      tasks.value = result.tasks
-    }
+    if (Array.isArray(result.flow) && result.flow.length) flow.value = result.flow
+    if (Array.isArray(result.tasks) && result.tasks.length) tasks.value = result.tasks
     points.value = response.points
   } catch (err) {
     error.value = err.message
@@ -432,15 +594,10 @@ async function confirmRequirement() {
   saveMessage.value = ''
   savingConversation.value = true
   try {
-    const response = await confirmConversation({
-      messages: messages.value,
-      conversation_id: conversationId.value,
-      prd: prd.value,
-      flow: flow.value,
-      tasks: tasks.value
-    })
+    const response = await confirmConversation({ messages: messages.value, conversation_id: conversationId.value, prd: prd.value, flow: flow.value, tasks: tasks.value })
     saveMessage.value = `需求已保存，记录编号 #${response.record_id}`
     fillPublishDraft()
+    fillCodeDraft()
   } catch (err) {
     error.value = err.message
   } finally {
@@ -474,12 +631,8 @@ function preparePublishFromCurrent(type) {
 
 function fillPublishDraft() {
   const firstUserMessage = messages.value.find((message) => message.role === 'user')?.content || ''
-  if (!publishForm.value.title) {
-    publishForm.value.title = firstUserMessage.slice(0, 32) || '未命名创意'
-  }
-  if (!publishForm.value.summary) {
-    publishForm.value.summary = prd.value[0] || tasks.value[0] || firstUserMessage.slice(0, 120)
-  }
+  if (!publishForm.value.title) publishForm.value.title = firstUserMessage.slice(0, 32) || '未命名创意'
+  if (!publishForm.value.summary) publishForm.value.summary = prd.value[0] || tasks.value[0] || firstUserMessage.slice(0, 120)
 }
 
 async function publishCurrentIdea() {
@@ -487,7 +640,7 @@ async function publishCurrentIdea() {
   communityMessage.value = ''
   publishing.value = true
   try {
-    const payload = {
+    const item = await publishCommunityItem({
       conversation_id: conversationId.value,
       item_type: publishForm.value.item_type,
       title: publishForm.value.title,
@@ -496,8 +649,7 @@ async function publishCurrentIdea() {
       flow: flow.value,
       tasks: tasks.value,
       project_url: publishForm.value.item_type === 'project' ? publishForm.value.project_url : null
-    }
-    const item = await publishCommunityItem(payload)
+    })
     communityMessage.value = `已公开发布：${item.title}`
     await loadCommunity()
   } catch (err) {
@@ -514,6 +666,87 @@ async function starCommunityItem(item) {
     item.star_count = response.star_count
   } catch (err) {
     communityError.value = err.message
+  }
+}
+
+function fillCodeDraft() {
+  const firstUserMessage = messages.value.find((message) => message.role === 'user')?.content || ''
+  if (!codeForm.value.title) codeForm.value.title = firstUserMessage.slice(0, 32) || publishForm.value.title || '未命名项目'
+  if (!codeForm.value.target_description) {
+    codeForm.value.target_description = [...prd.value, ...flow.value, ...tasks.value].join('\n') || firstUserMessage
+  }
+}
+
+async function startCodeGeneration() {
+  codeGenerating.value = true
+  codeError.value = ''
+  codeMessage.value = ''
+  codeEvents.value = []
+  try {
+    const job = await createCodeGenerationJob({ ...codeForm.value, conversation_id: conversationId.value })
+    applyCodeJob(job)
+    await streamCodeGenerationEvents(job.id, (event) => {
+      if (event.status) return
+      codeEvents.value.push(event)
+    })
+    codeMessage.value = '代码预览已生成，可以查看图谱和文件。'
+    const refreshed = await getCodeGenerationJob(job.id)
+    applyCodeJob(refreshed)
+    points.value = (await getMe()).points
+  } catch (err) {
+    codeError.value = err.message
+  } finally {
+    codeGenerating.value = false
+  }
+}
+
+function applyCodeJob(job) {
+  codeJob.value = job
+  codeFiles.value = job.files || []
+  codeNodes.value = job.graph_nodes || []
+  codeEdges.value = job.graph_edges || []
+  selectedCodeFile.value = codeFiles.value[0] || null
+  selectedCodeNode.value = codeNodes.value[0] || null
+}
+
+function nodePosition(key) {
+  const node = codeNodes.value.find((item) => item.key === key)
+  return node?.position || { x: 120, y: 120 }
+}
+
+function selectCodeNode(node) {
+  selectedCodeNode.value = node
+  if (node.file_path) selectCodeFile(node.file_path)
+}
+
+function selectCodeFile(path) {
+  const file = codeFiles.value.find((item) => item.path === path)
+  if (file) selectedCodeFile.value = file
+}
+
+async function saveGitHubSettings() {
+  codeError.value = ''
+  try {
+    githubConfig.value = await saveGitHubToken(githubForm.value)
+    githubForm.value.token = ''
+    codeMessage.value = 'GitHub 配置已保存。'
+  } catch (err) {
+    codeError.value = err.message
+  }
+}
+
+async function pushGeneratedCode() {
+  if (!codeJob.value) return
+  codePushing.value = true
+  codeError.value = ''
+  try {
+    const result = await pushCodeGenerationToGitHub(codeJob.value.id, { repo: githubForm.value.default_repo })
+    codeJob.value.github_url = result.url
+    codeMessage.value = `已推送到 ${result.url}`
+  } catch (err) {
+    codeError.value = err.message
+  } finally {
+    codePushing.value = false
   }
 }
 
@@ -534,17 +767,12 @@ function previewLines(item) {
 }
 
 function formatDate(value) {
-  if (!value) {
-    return ''
-  }
-  return new Date(value).toLocaleDateString()
+  return value ? new Date(value).toLocaleDateString() : ''
 }
 
 async function scrollChat() {
   await nextTick()
-  if (chatListEl.value) {
-    chatListEl.value.scrollTop = chatListEl.value.scrollHeight
-  }
+  if (chatListEl.value) chatListEl.value.scrollTop = chatListEl.value.scrollHeight
 }
 
 function logout() {

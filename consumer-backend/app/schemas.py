@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+
+from .codegen_registry import validate_stack_choice
 
 
 class AuthRequest(BaseModel):
@@ -20,13 +22,21 @@ class PointOut(BaseModel):
 
 
 class AIConfigIn(BaseModel):
-    base_url: HttpUrl
-    api_key: str = Field(min_length=8, max_length=4096)
+    provider_type: str = Field(default="custom", pattern="^(platform|custom)$")
+    base_url: HttpUrl | None = None
+    api_key: str | None = Field(default=None, min_length=8, max_length=4096)
     model: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_custom_config(self) -> "AIConfigIn":
+        if self.provider_type == "custom" and (self.base_url is None or not self.api_key):
+            raise ValueError("Custom model requires Base URL and API Key")
+        return self
 
 
 class AIConfigOut(BaseModel):
     configured: bool
+    provider_type: str = "custom"
     base_url: str | None = None
     model: str | None = None
 
@@ -113,3 +123,106 @@ class CommunityStarResponse(BaseModel):
     item_id: int
     starred: bool
     star_count: int
+
+
+class TechStackIn(BaseModel):
+    frontend: str
+    backend: str
+    database: str
+    deploy: str
+
+    @field_validator("frontend")
+    @classmethod
+    def validate_frontend(cls, value: str) -> str:
+        return validate_stack_choice("frontend", value)
+
+    @field_validator("backend")
+    @classmethod
+    def validate_backend(cls, value: str) -> str:
+        return validate_stack_choice("backend", value)
+
+    @field_validator("database")
+    @classmethod
+    def validate_database(cls, value: str) -> str:
+        return validate_stack_choice("database", value)
+
+    @field_validator("deploy")
+    @classmethod
+    def validate_deploy(cls, value: str) -> str:
+        return validate_stack_choice("deploy", value)
+
+
+class CodeGenerationJobCreate(BaseModel):
+    conversation_id: int | None = None
+    title: str = Field(min_length=1, max_length=191)
+    target_description: str = Field(min_length=1, max_length=4000)
+    stack: TechStackIn
+
+
+class GitHubConfigIn(BaseModel):
+    token: str = Field(min_length=20, max_length=4096)
+    default_repo: str | None = Field(default=None, max_length=255)
+    default_branch: str = Field(default="main", min_length=1, max_length=128)
+
+
+class GitHubConfigOut(BaseModel):
+    configured: bool
+    default_repo: str | None = None
+    default_branch: str | None = None
+
+
+class CodeFileOut(BaseModel):
+    path: str
+    language: str
+    content: str
+    explanation: str
+    status: str
+
+
+class CodeGraphNodeOut(BaseModel):
+    key: str
+    type: str
+    label: str
+    description: str
+    file_path: str | None = None
+    position: dict | None = None
+    status: str
+
+
+class CodeGraphEdgeOut(BaseModel):
+    source: str
+    target: str
+    type: str
+    label: str
+
+
+class CodeGenerationJobOut(BaseModel):
+    id: int
+    title: str
+    target_description: str
+    stack: dict
+    status: str
+    provider_type: str
+    estimated_tokens: int
+    estimated_points: int
+    actual_tokens: int
+    actual_points: int
+    github_repo: str | None = None
+    github_branch: str | None = None
+    github_url: str | None = None
+    error_message: str | None = None
+    files: list[CodeFileOut]
+    graph_nodes: list[CodeGraphNodeOut]
+    graph_edges: list[CodeGraphEdgeOut]
+
+
+class GitHubPushRequest(BaseModel):
+    repo: str | None = Field(default=None, max_length=255)
+    branch: str | None = Field(default=None, max_length=255)
+
+
+class GitHubPushResponse(BaseModel):
+    pushed: bool
+    repo: str
+    branch: str
+    url: str
