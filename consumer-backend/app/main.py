@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .ai_client import generate_product_plan
+from .ai_client import generate_product_plan, normalize_result
 from .config import get_settings
 from .codegen_registry import get_stack_labels, stack_registry_out
 from .database import get_db
@@ -236,6 +236,11 @@ def prd_item_out(conversation: Conversation) -> dict:
     prd = result.get("prd") or []
     flow = result.get("flow") or []
     tasks = result.get("tasks") or []
+    if not prd:
+        extracted = extract_result_from_messages(result.get("messages") or [])
+        prd = extracted.get("prd") or []
+        flow = flow or extracted.get("flow") or []
+        tasks = tasks or extracted.get("tasks") or []
     summary_source = prd or tasks or flow or [conversation.title]
     return {
         "id": conversation.id,
@@ -246,6 +251,16 @@ def prd_item_out(conversation: Conversation) -> dict:
         "tasks": tasks,
         "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else "",
     }
+
+
+def extract_result_from_messages(messages: list[dict]) -> dict:
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        parsed = normalize_result(str(message.get("content") or ""))
+        if parsed.get("prd") or parsed.get("flow") or parsed.get("tasks"):
+            return parsed
+    return {"prd": [], "flow": [], "tasks": []}
 
 
 def add_code_event(db: Session, job_id: int, event_type: str, title: str, payload: dict | None = None) -> None:
@@ -462,6 +477,508 @@ def nginx_template() -> str:
   }
 }
 """
+
+
+def strip_requirement_prefix(line: str) -> str:
+    value = line.strip().lstrip("-• ").strip()
+    for prefix in ("PRD", "流程", "任务", "补充生成目标"):
+        for separator in ("：", ":"):
+            marker = f"{prefix}{separator}"
+            if value.startswith(marker):
+                return value[len(marker):].strip()
+    return value
+
+
+def parse_generation_context(title: str, target: str) -> dict:
+    sections = {"prd": [], "flow": [], "tasks": [], "notes": []}
+    current = "notes"
+    for raw_line in target.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading = line.rstrip("：:")
+        if heading in {"PRD", "流程", "任务"}:
+            current = {"PRD": "prd", "流程": "flow", "任务": "tasks"}[heading]
+            continue
+        if heading in {"选择的 PRD", "补充生成目标"}:
+            current = "notes"
+            continue
+        value = strip_requirement_prefix(line)
+        if value:
+            sections[current].append(value)
+
+    if not sections["prd"]:
+        sections["prd"] = sections["notes"][:6] or [target.strip() or title]
+    if not sections["flow"]:
+        sections["flow"] = ["需求确认", "核心页面操作", "业务处理", "结果反馈"]
+    if not sections["tasks"]:
+        sections["tasks"] = [f"实现：{item}" for item in sections["prd"][:4]]
+    return {
+        "title": title,
+        "target": target,
+        "prd": sections["prd"][:8],
+        "flow": sections["flow"][:8],
+        "tasks": sections["tasks"][:8],
+        "notes": sections["notes"][:8],
+    }
+
+
+def build_code_artifacts(title: str, target: str, stack: dict) -> dict:
+    labels = selected_stack_labels(stack)
+    context = parse_generation_context(title, target)
+    frontend_ext = "vue" if stack["frontend"] == "vue" else "jsx"
+    backend_ext = "py" if stack["backend"] == "fastapi" else ("ts" if stack["backend"] == "nestjs" else "java")
+    files = [
+        {
+            "path": f"frontend/src/App.{frontend_ext}",
+            "language": stack["frontend"],
+            "explanation": "根据已选择 PRD 生成的产品主界面，展示核心需求、流程和任务入口。",
+            "content": frontend_template(stack["frontend"], context),
+        },
+        {
+            "path": f"backend/src/main.{backend_ext}",
+            "language": stack["backend"],
+            "explanation": "围绕 PRD 生成的后端入口，提供项目摘要、PRD、流程和任务 API。",
+            "content": backend_template(stack["backend"], context),
+        },
+        {
+            "path": "database/schema.sql",
+            "language": stack["database"],
+            "explanation": "围绕 PRD 生成的数据库表结构，保存需求、流程节点和任务。",
+            "content": database_template(stack["database"], context),
+        },
+        {
+            "path": "README.md",
+            "language": "markdown",
+            "explanation": "项目说明，包含来自已选择 PRD 的需求、流程和实现任务。",
+            "content": readme_template(labels, context),
+        },
+    ]
+    if stack["deploy"] == "docker":
+        files.append({"path": "docker-compose.yml", "language": "yaml", "explanation": "Docker 部署入口。", "content": docker_template(stack)})
+    else:
+        files.append({"path": "deploy/nginx.conf", "language": "nginx", "explanation": "Ubuntu/Nginx 部署配置。", "content": nginx_template()})
+
+    nodes = [
+        {"key": "ui", "type": "page", "label": f"{labels['frontend']} 页面", "description": f"展示《{title}》的 PRD、流程和任务。", "file_path": files[0]["path"], "position": {"x": 80, "y": 120}},
+        {"key": "api", "type": "api", "label": "PRD 业务 API", "description": "向页面提供项目摘要、需求、流程和任务数据。", "file_path": files[1]["path"], "position": {"x": 330, "y": 120}},
+        {"key": "service", "type": "service", "label": labels["backend"], "description": "处理已确认 PRD 的业务规则和状态流转。", "file_path": files[1]["path"], "position": {"x": 580, "y": 120}},
+        {"key": "db", "type": "database", "label": labels["database"], "description": "保存 PRD 条目、流程节点和任务执行状态。", "file_path": files[2]["path"], "position": {"x": 830, "y": 120}},
+        {"key": "deploy", "type": "deploy", "label": labels["deploy"], "description": "负责把该 PRD 对应的产品原型运行起来。", "file_path": files[-1]["path"], "position": {"x": 580, "y": 300}},
+    ]
+    for index, item in enumerate(context["prd"][:3]):
+        nodes.append({"key": f"req-{index + 1}", "type": "component", "label": f"需求 {index + 1}", "description": item, "file_path": files[0]["path"], "position": {"x": 170 + index * 220, "y": 245}})
+
+    edges = [
+        {"source": "ui", "target": "api", "type": "调用", "label": "页面读取 PRD 数据"},
+        {"source": "api", "target": "service", "type": "路由", "label": "API 进入业务服务"},
+        {"source": "service", "target": "db", "type": "读写", "label": "保存需求和任务状态"},
+        {"source": "deploy", "target": "ui", "type": "部署", "label": "托管前端"},
+        {"source": "deploy", "target": "service", "type": "部署", "label": "运行后端"},
+    ]
+    for index in range(min(3, len(context["prd"]))):
+        edges.append({"source": "ui", "target": f"req-{index + 1}", "type": "展示", "label": "页面呈现需求"})
+    return {"files": files, "nodes": nodes, "edges": edges}
+
+
+def infer_frontend_page_type(context: dict) -> str:
+    text = json.dumps(context, ensure_ascii=False)
+    commerce_keywords = ("电商", "商品", "服装", "价格", "尺码", "库存", "购买", "分类", "banner", "搜索", "收藏", "小程序")
+    if any(keyword in text for keyword in commerce_keywords):
+        return "commerce"
+    return "product"
+
+
+def frontend_page_model(context: dict) -> dict:
+    page_type = infer_frontend_page_type(context)
+    if page_type == "commerce":
+        return {
+            "type": "commerce",
+            "brand": "衣橱选品",
+            "title": "春夏服装新品馆",
+            "subtitle": "为服装零售商家打造的商品展示小程序，支持图片、价格、尺码、颜色和库存快速浏览。",
+            "search": "搜索上衣、裙子、通勤风格",
+            "categories": ["上衣", "裤子", "裙子", "春夏", "秋冬", "休闲", "商务"],
+            "hero_tags": ["Banner轮播", "快捷分类", "新品推荐", "热卖商品"],
+            "products": [
+                {"name": "轻盈通勤衬衫", "category": "上衣", "price": "¥199", "meta": "S-XL · 3色 · 有库存", "tag": "新品"},
+                {"name": "高腰垂感西裤", "category": "裤子", "price": "¥269", "meta": "XS-L · 黑/杏 · 少量库存", "tag": "热卖"},
+                {"name": "法式碎花半裙", "category": "裙子", "price": "¥229", "meta": "S-L · 春夏 · 可收藏", "tag": "推荐"},
+                {"name": "商务针织外套", "category": "商务", "price": "¥329", "meta": "M-XL · 2色 · 可联系商家", "tag": "精选"},
+            ],
+            "tabs": ["首页", "分类", "搜索", "收藏", "联系"],
+        }
+    return {
+        "type": "product",
+        "brand": context["title"],
+        "title": context["title"],
+        "subtitle": context["prd"][0] if context["prd"] else "围绕已确认需求生成的产品原型页面。",
+        "features": context["prd"][:4],
+        "actions": context["flow"][:4],
+    }
+
+
+def frontend_template(frontend: str, context: dict) -> str:
+    page = frontend_page_model(context)
+    page_json = json.dumps(page, ensure_ascii=False, indent=2)
+    if page["type"] == "commerce":
+        if frontend == "react":
+            return """import React from 'react';
+import './App.css';
+
+const page = __PAGE_JSON__;
+
+export default function App() {
+  return (
+    <main className="shop-app">
+      <header className="shop-topbar">
+        <strong>{page.brand}</strong>
+        <div className="shop-search">{page.search}</div>
+        <button>联系商家</button>
+      </header>
+
+      <section className="shop-hero">
+        <p>NEW COLLECTION</p>
+        <h1>{page.title}</h1>
+        <span>{page.subtitle}</span>
+        <div>{page.hero_tags.map(tag => <b key={tag}>{tag}</b>)}</div>
+      </section>
+
+      <nav className="shop-categories">
+        {page.categories.map(category => <button key={category}>{category}</button>)}
+      </nav>
+
+      <section className="product-grid">
+        {page.products.map(product => (
+          <article key={product.name} className="product-card">
+            <div className="product-image"><span>{product.tag}</span></div>
+            <small>{product.category}</small>
+            <h2>{product.name}</h2>
+            <p>{product.meta}</p>
+            <footer><strong>{product.price}</strong><button>购买</button></footer>
+          </article>
+        ))}
+      </section>
+
+      <footer className="shop-tabbar">
+        {page.tabs.map(tab => <button key={tab}>{tab}</button>)}
+      </footer>
+    </main>
+  );
+}
+""".replace("__PAGE_JSON__", page_json)
+        return """<template>
+  <main class="shop-app">
+    <header class="shop-topbar">
+      <strong>{{ page.brand }}</strong>
+      <div class="shop-search">{{ page.search }}</div>
+      <button>联系商家</button>
+    </header>
+
+    <section class="shop-hero">
+      <p>NEW COLLECTION</p>
+      <h1>{{ page.title }}</h1>
+      <span>{{ page.subtitle }}</span>
+      <div>
+        <b v-for="tag in page.hero_tags" :key="tag">{{ tag }}</b>
+      </div>
+    </section>
+
+    <nav class="shop-categories">
+      <button v-for="category in page.categories" :key="category">{{ category }}</button>
+    </nav>
+
+    <section class="product-grid">
+      <article v-for="product in page.products" :key="product.name" class="product-card">
+        <div class="product-image"><span>{{ product.tag }}</span></div>
+        <small>{{ product.category }}</small>
+        <h2>{{ product.name }}</h2>
+        <p>{{ product.meta }}</p>
+        <footer>
+          <strong>{{ product.price }}</strong>
+          <button>购买</button>
+        </footer>
+      </article>
+    </section>
+
+    <footer class="shop-tabbar">
+      <button v-for="tab in page.tabs" :key="tab">{{ tab }}</button>
+    </footer>
+  </main>
+</template>
+
+<script setup>
+const page = __PAGE_JSON__
+</script>
+
+<style scoped>
+.shop-app { max-width: 420px; min-height: 100vh; margin: 0 auto; padding: 18px; background: #f8f3ea; color: #171321; font-family: Inter, system-ui, sans-serif; }
+.shop-topbar { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; position: sticky; top: 0; padding: 10px 0 14px; background: #f8f3ea; }
+.shop-topbar strong { font-size: 18px; }
+.shop-topbar button, .product-card button { border: 0; border-radius: 999px; background: #171321; color: white; padding: 10px 14px; font-weight: 800; }
+.shop-search { min-width: 0; border-radius: 999px; background: white; padding: 10px 14px; color: #756d66; font-size: 13px; }
+.shop-hero { border-radius: 26px; padding: 24px; background: linear-gradient(135deg, #171321, #d86b43); color: white; box-shadow: 0 20px 45px rgba(23,19,33,.18); }
+.shop-hero p { margin: 0 0 8px; color: #ffd6b7; font-size: 12px; font-weight: 900; letter-spacing: .08em; }
+.shop-hero h1 { margin: 0; font-size: 34px; line-height: 1; }
+.shop-hero span { display: block; margin-top: 12px; color: rgba(255,255,255,.78); line-height: 1.6; }
+.shop-hero div, .shop-categories { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.shop-hero b, .shop-categories button { border: 0; border-radius: 999px; padding: 8px 12px; background: rgba(255,255,255,.18); color: inherit; font-weight: 800; }
+.shop-categories { margin: 18px 0; }
+.shop-categories button { background: white; color: #171321; }
+.product-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding-bottom: 78px; }
+.product-card { border-radius: 22px; padding: 12px; background: white; box-shadow: 0 12px 30px rgba(23,19,33,.08); }
+.product-image { height: 118px; border-radius: 18px; background: linear-gradient(135deg, #eadfd0, #c9633d); position: relative; }
+.product-image span { position: absolute; left: 10px; top: 10px; border-radius: 999px; padding: 5px 8px; background: white; color: #c9633d; font-size: 11px; font-weight: 900; }
+.product-card small { display: block; margin-top: 10px; color: #c9633d; font-weight: 900; }
+.product-card h2 { margin: 5px 0; font-size: 16px; }
+.product-card p { min-height: 38px; margin: 0; color: #756d66; font-size: 12px; line-height: 1.5; }
+.product-card footer { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.product-card strong { font-size: 18px; }
+.shop-tabbar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 4px; width: min(390px, calc(100vw - 32px)); padding: 8px; border-radius: 999px; background: rgba(255,255,255,.9); box-shadow: 0 16px 40px rgba(23,19,33,.16); backdrop-filter: blur(16px); }
+.shop-tabbar button { flex: 1; border: 0; background: transparent; color: #756d66; font-weight: 800; }
+</style>
+""".replace("__PAGE_JSON__", page_json)
+
+    project_json = json.dumps(page, ensure_ascii=False, indent=2)
+    return """<template>
+  <main class="generated-app">
+    <header>
+      <strong>{{ page.brand }}</strong>
+      <h1>{{ page.title }}</h1>
+      <p>{{ page.subtitle }}</p>
+      <button>开始使用</button>
+    </header>
+    <section>
+      <article v-for="feature in page.features" :key="feature">
+        <h2>{{ feature }}</h2>
+      </article>
+    </section>
+  </main>
+</template>
+
+<script setup>
+const page = __PAGE_JSON__
+</script>
+""".replace("__PAGE_JSON__", project_json)
+
+
+def backend_template(backend: str, context: dict) -> str:
+    title = context["title"]
+    project_json = json.dumps(context, ensure_ascii=False, indent=2)
+    if backend == "nestjs":
+        return f"""import {{ Controller, Get, Module }} from '@nestjs/common';
+
+const project = {project_json};
+
+@Controller()
+class AppController {{
+  @Get('/api/health')
+  health() {{
+    return {{ ok: true, app: project.title }};
+  }}
+
+  @Get('/api/project')
+  projectSummary() {{
+    return project;
+  }}
+
+  @Get('/api/tasks')
+  tasks() {{
+    return project.tasks.map((title, index) => ({{ id: index + 1, title, status: 'todo' }}));
+  }}
+}}
+
+@Module({{ controllers: [AppController] }})
+export class AppModule {{}}
+"""
+    if backend == "springboot":
+        return f"""package com.thinkland.generated;
+
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+import java.util.List;
+import java.util.Map;
+
+@RestController
+public class AppController {{
+  @GetMapping("/api/health")
+  public Map<String, Object> health() {{
+    return Map.of("ok", true, "app", "{title}");
+  }}
+
+  @GetMapping("/api/project")
+  public Map<String, Object> project() {{
+    return Map.of(
+      "title", "{title}",
+      "prd", List.of({", ".join(repr(item) for item in context["prd"])}),
+      "flow", List.of({", ".join(repr(item) for item in context["flow"])}),
+      "tasks", List.of({", ".join(repr(item) for item in context["tasks"])})
+    );
+  }}
+}}
+"""
+    return f"""from fastapi import FastAPI
+
+app = FastAPI(title={title!r})
+PROJECT = {repr(context)}
+
+@app.get("/api/health")
+def health():
+    return {{"ok": True, "app": PROJECT["title"]}}
+
+@app.get("/api/project")
+def project_summary():
+    return PROJECT
+
+@app.get("/api/tasks")
+def list_tasks():
+    return [
+        {{"id": index + 1, "title": task, "status": "todo"}}
+        for index, task in enumerate(PROJECT["tasks"])
+    ]
+"""
+
+
+def database_template(database: str, context: dict) -> str:
+    serial = "BIGSERIAL" if database == "postgresql" else "BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"
+    return f"""CREATE TABLE products (
+  id {serial} PRIMARY KEY,
+  title VARCHAR(191) NOT NULL,
+  description TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE requirements (
+  id {serial} PRIMARY KEY,
+  product_id BIGINT NOT NULL,
+  sort_order INT NOT NULL,
+  content TEXT NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'planned'
+);
+
+CREATE TABLE flow_nodes (
+  id {serial} PRIMARY KEY,
+  product_id BIGINT NOT NULL,
+  sort_order INT NOT NULL,
+  title VARCHAR(191) NOT NULL
+);
+
+CREATE TABLE tasks (
+  id {serial} PRIMARY KEY,
+  product_id BIGINT NOT NULL,
+  title VARCHAR(191) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'todo'
+);
+
+-- Seed from selected PRD: {context["title"]}
+"""
+
+
+def readme_template(labels: dict, context: dict) -> str:
+    prd = "\n".join(f"- {item}" for item in context["prd"])
+    flow = "\n".join(f"{index + 1}. {item}" for index, item in enumerate(context["flow"]))
+    tasks = "\n".join(f"- [ ] {item}" for item in context["tasks"])
+    return f"""# {context["title"]}
+
+## 技术栈
+
+- 前端：{labels['frontend']}
+- 后端：{labels['backend']}
+- 数据库：{labels['database']}
+- 部署：{labels['deploy']}
+
+## 来自已确认 PRD 的需求
+
+{prd}
+
+## 业务流程
+
+{flow}
+
+## 开发任务
+
+{tasks}
+"""
+
+
+def requirement_label(text: str, index: int) -> str:
+    cleaned = strip_requirement_prefix(text).strip()
+    for separator in ("：", ":", "，", ",", "。", "."):
+        if separator in cleaned:
+            cleaned = cleaned.split(separator, 1)[0].strip()
+            break
+    return cleaned[:14] or f"需求 {index + 1}"
+
+
+def build_code_artifacts(title: str, target: str, stack: dict) -> dict:
+    labels = selected_stack_labels(stack)
+    context = parse_generation_context(title, target)
+    frontend_ext = "vue" if stack["frontend"] == "vue" else "jsx"
+    backend_ext = "py" if stack["backend"] == "fastapi" else ("ts" if stack["backend"] == "nestjs" else "java")
+    files = [
+        {
+            "path": f"frontend/src/App.{frontend_ext}",
+            "language": stack["frontend"],
+            "explanation": "由所选 PRD 生成的界面代码，负责展示真实需求、流程和任务。",
+            "content": frontend_template(stack["frontend"], context),
+        },
+        {
+            "path": f"backend/src/main.{backend_ext}",
+            "language": stack["backend"],
+            "explanation": "由所选 PRD 生成的接口代码，负责输出项目、需求和任务数据。",
+            "content": backend_template(stack["backend"], context),
+        },
+        {
+            "path": "database/schema.sql",
+            "language": stack["database"],
+            "explanation": "由所选 PRD 生成的数据模型，保存产品、需求、流程节点和任务状态。",
+            "content": database_template(stack["database"], context),
+        },
+        {
+            "path": "README.md",
+            "language": "markdown",
+            "explanation": "记录本次代码生成所依据的 PRD、业务流程和开发任务。",
+            "content": readme_template(labels, context),
+        },
+    ]
+    deploy_file = {"path": "docker-compose.yml", "language": "yaml", "explanation": "把 PRD 生成项目编排为可运行服务。", "content": docker_template(stack)}
+    if stack["deploy"] != "docker":
+        deploy_file = {"path": "deploy/nginx.conf", "language": "nginx", "explanation": "把 PRD 生成项目接入 Nginx。", "content": nginx_template()}
+    files.append(deploy_file)
+
+    nodes = []
+    for index, item in enumerate(context["prd"][:6]):
+        nodes.append(
+            {
+                "key": f"req-{index + 1}",
+                "type": "requirement",
+                "label": requirement_label(item, index),
+                "description": item,
+                "file_path": files[0]["path"],
+                "position": {"x": 115 + (index % 3) * 235, "y": 105 + (index // 3) * 105},
+            }
+        )
+    code_nodes = [
+        {"key": "frontend", "type": "page", "label": f"{labels['frontend']} 页面代码", "description": "承接 PRD 需求，生成用户可见界面。", "file_path": files[0]["path"], "position": {"x": 170, "y": 335}},
+        {"key": "backend", "type": "api", "label": f"{labels['backend']} 接口代码", "description": "承接 PRD 需求，提供项目和任务接口。", "file_path": files[1]["path"], "position": {"x": 420, "y": 335}},
+        {"key": "database", "type": "table", "label": f"{labels['database']} 数据模型", "description": "保存 PRD 条目、流程节点和任务状态。", "file_path": files[2]["path"], "position": {"x": 670, "y": 335}},
+        {"key": "deploy", "type": "deploy", "label": labels["deploy"], "description": "运行本次 PRD 对应的生成项目。", "file_path": files[-1]["path"], "position": {"x": 900, "y": 335}},
+    ]
+    nodes.extend(code_nodes)
+
+    edges = []
+    for index in range(len(context["prd"][:6])):
+        req_key = f"req-{index + 1}"
+        edges.append({"source": req_key, "target": "frontend", "type": "实现", "label": "需求呈现在页面"})
+        edges.append({"source": req_key, "target": "backend", "type": "实现", "label": "需求进入接口"})
+    edges.extend(
+        [
+            {"source": "backend", "target": "database", "type": "读写", "label": "接口读写需求数据"},
+            {"source": "deploy", "target": "frontend", "type": "部署", "label": "部署页面"},
+            {"source": "deploy", "target": "backend", "type": "部署", "label": "部署接口"},
+        ]
+    )
+    return {"files": files, "nodes": nodes, "edges": edges}
 
 
 def spend_code_generation_points(db: Session, account, user_id: int, job: CodeGenerationJob, total_tokens: int) -> int:
@@ -691,12 +1208,16 @@ def confirm_conversation(
     messages = [{"role": item.role, "content": item.content} for item in payload.messages]
     conversation = get_or_create_conversation(db, current_user.id, payload.conversation_id, messages)
     append_missing_messages(db, conversation, current_user.id, messages)
+    extracted = extract_result_from_messages(messages)
+    prd = payload.prd or extracted.get("prd") or []
+    flow = payload.flow or extracted.get("flow") or []
+    tasks = payload.tasks or extracted.get("tasks") or []
     conversation.status = "confirmed"
     conversation.result_json = {
         "messages": messages,
-        "prd": payload.prd,
-        "flow": payload.flow,
-        "tasks": payload.tasks,
+        "prd": prd,
+        "flow": flow,
+        "tasks": tasks,
     }
 
     record = GenerationRecord(
@@ -723,7 +1244,8 @@ def list_prds(current_user: User = Depends(get_current_user), db: Session = Depe
         .where(Conversation.user_id == current_user.id, Conversation.status == "confirmed")
         .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
     ).all()
-    return {"items": [prd_item_out(conversation) for conversation in conversations if (conversation.result_json or {}).get("prd")]}
+    items = [prd_item_out(conversation) for conversation in conversations]
+    return {"items": [item for item in items if item["prd"]]}
 
 
 @app.get("/api/code-generation/stack-registry")
@@ -765,10 +1287,11 @@ def create_code_generation_job(
             payload.target_description.strip(),
         ]
     )
+    source_title = (conversation.title or payload.title).strip()
     job = CodeGenerationJob(
         user_id=current_user.id,
         conversation_id=conversation.id,
-        title=payload.title.strip(),
+        title=source_title,
         target_description=linked_target,
         stack_json=stack,
         status="planning",

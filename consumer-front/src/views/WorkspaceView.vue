@@ -43,6 +43,10 @@
               :class="[message.role, { focused: focusedMessageIndex === index }]"
             >
               <span>{{ message.role === 'user' ? '你' : 'Think Land' }}</span>
+              <details v-if="message.thinking" class="thinking-box">
+                <summary>思考过程</summary>
+                <p>{{ message.thinking }}</p>
+              </details>
               <p>{{ message.content }}</p>
             </article>
             <article v-if="loading" class="chat-message assistant">
@@ -98,9 +102,25 @@
             <button v-if="prd.length" class="publish-mini" type="button" @click="preparePublishFromCurrent('prd')">公开</button>
           </div>
         </div>
-        <ul>
-          <li v-for="item in prd" :key="item">{{ item }}</li>
-        </ul>
+        <div v-if="prdItems.length" class="prd-history-strip">
+          <button
+            v-for="item in prdItems"
+            :key="item.id"
+            type="button"
+            :class="{ active: String(item.id) === String(selectedPrdId) }"
+            @click="selectPrdItem(item)"
+          >
+            <strong>{{ item.title }}</strong>
+            <span>{{ item.prd.length }} 条 PRD · {{ formatDate(item.updated_at || item.created_at) }}</span>
+          </button>
+        </div>
+        <div v-if="prd.length" class="prd-card-grid">
+          <article v-for="(item, index) in prd" :key="item" class="prd-card">
+            <span>{{ String(index + 1).padStart(2, '0') }}</span>
+            <h3>{{ prdTitle(item) }}</h3>
+            <p>{{ prdBody(item) }}</p>
+          </article>
+        </div>
         <p v-if="!prd.length" class="empty-state">先在创意工作台里完成一轮对话，PRD 会出现在这里。</p>
       </section>
 
@@ -207,7 +227,7 @@
             </div>
             <label>
               选择 PRD
-              <select v-model="selectedPrdId" @change="applySelectedPrdToCodeForm">
+              <select v-model="selectedPrdId" @change="applySelectedPrdToCodeForm(true)">
                 <option value="">请选择已保存的 PRD</option>
                 <option v-for="item in prdItems" :key="item.id" :value="String(item.id)">{{ item.title }}</option>
               </select>
@@ -266,10 +286,11 @@
               <b>{{ codeNodes.length }} 节点</b>
             </div>
             <div class="code-graph">
-              <svg aria-hidden="true">
+              <svg aria-hidden="true" viewBox="0 0 1000 390" preserveAspectRatio="none">
                 <line
                   v-for="edge in codeEdges"
                   :key="`${edge.source}-${edge.target}`"
+                  class="code-edge"
                   :x1="nodePosition(edge.source).x"
                   :y1="nodePosition(edge.source).y"
                   :x2="nodePosition(edge.target).x"
@@ -280,8 +301,8 @@
                 v-for="node in codeNodes"
                 :key="node.key"
                 class="code-node"
-                :class="{ active: selectedCodeNode?.key === node.key }"
-                :style="{ left: `${nodePosition(node.key).x}px`, top: `${nodePosition(node.key).y}px` }"
+                :class="[{ active: selectedCodeNode?.key === node.key }, node.type]"
+                :style="graphNodeStyle(node.key)"
                 type="button"
                 @click="selectCodeNode(node)"
               >
@@ -309,19 +330,140 @@
           </aside>
         </div>
 
-        <div class="code-files-panel">
-          <div class="panel-title">
-            <span>文件预览</span>
-            <b>{{ codeFiles.length }} 个文件</b>
+        <div class="codegen-secondary-grid">
+          <section class="frontend-preview-panel">
+            <div class="panel-title">
+              <span>前端内置预览</span>
+              <b>{{ codeForm.stack.frontend }}</b>
+            </div>
+            <div class="preview-browser">
+              <div class="preview-browser-bar">
+                <span></span>
+                <span></span>
+                <span></span>
+                <strong>{{ previewProject.title }}</strong>
+              </div>
+              <div v-if="previewProject.pageType === 'commerce'" class="commerce-preview">
+                <header class="commerce-topbar">
+                  <strong>{{ previewProject.brand }}</strong>
+                  <span>{{ previewProject.search }}</span>
+                  <button type="button">联系商家</button>
+                </header>
+                <section class="commerce-hero">
+                  <small>NEW COLLECTION</small>
+                  <h3>{{ previewProject.title }}</h3>
+                  <p>{{ previewProject.summary }}</p>
+                  <div>
+                    <b v-for="tag in previewProject.heroTags" :key="tag">{{ tag }}</b>
+                  </div>
+                </section>
+                <nav class="commerce-categories">
+                  <button v-for="category in previewProject.categories" :key="category" type="button">{{ category }}</button>
+                </nav>
+                <section class="commerce-products">
+                  <article v-for="product in previewProject.products" :key="product.name">
+                    <div><span>{{ product.tag }}</span></div>
+                    <small>{{ product.category }}</small>
+                    <h4>{{ product.name }}</h4>
+                    <p>{{ product.meta }}</p>
+                    <footer><strong>{{ product.price }}</strong><button type="button">购买</button></footer>
+                  </article>
+                </section>
+                <footer class="commerce-tabbar">
+                  <button v-for="tab in previewProject.tabs" :key="tab" type="button">{{ tab }}</button>
+                </footer>
+              </div>
+              <template v-else>
+                <div class="preview-hero">
+                  <small>{{ codeForm.stack.frontend }} · {{ codeForm.stack.backend }}</small>
+                  <h3>{{ previewProject.title }}</h3>
+                  <p>{{ previewProject.summary }}</p>
+                  <button type="button">{{ previewProject.cta }}</button>
+                </div>
+                <div class="preview-sections">
+                  <article v-for="(item, index) in previewProject.prd" :key="`preview-prd-${index}`">
+                    <span>{{ String(index + 1).padStart(2, '0') }}</span>
+                    <p>{{ item }}</p>
+                  </article>
+                </div>
+              </template>
+            </div>
+          </section>
+
+          <div class="code-files-panel">
+            <div class="panel-title">
+              <span>文件预览</span>
+              <b>{{ codeFiles.length }} 个文件</b>
+            </div>
+            <div class="code-file-tabs">
+              <button v-for="file in codeFiles" :key="file.path" type="button" :class="{ active: selectedCodeFile?.path === file.path }" @click="chooseCodeFile(file)">
+                {{ file.path }}
+              </button>
+            </div>
+            <div v-if="selectedCodeFile" class="code-file-viewbar">
+              <p>{{ selectedCodeFile.explanation }}</p>
+              <div v-if="selectedCodeFileIsFrontend" class="code-file-view-toggle">
+                <button type="button" :class="{ active: codeFileViewMode === 'preview' }" @click="codeFileViewMode = 'preview'">页面预览</button>
+                <button type="button" :class="{ active: codeFileViewMode === 'code' }" @click="codeFileViewMode = 'code'">查看代码</button>
+              </div>
+            </div>
+            <div v-if="selectedCodeFile && selectedCodeFileIsFrontend && codeFileViewMode === 'preview'" class="code-inline-preview">
+              <div class="preview-browser file-preview-browser">
+                <div class="preview-browser-bar">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                  <strong>{{ previewProject.title }}</strong>
+                </div>
+                <div v-if="previewProject.pageType === 'commerce'" class="commerce-preview">
+                  <header class="commerce-topbar">
+                    <strong>{{ previewProject.brand }}</strong>
+                    <span>{{ previewProject.search }}</span>
+                    <button type="button">联系商家</button>
+                  </header>
+                  <section class="commerce-hero">
+                    <small>NEW COLLECTION</small>
+                    <h3>{{ previewProject.title }}</h3>
+                    <p>{{ previewProject.summary }}</p>
+                    <div>
+                      <b v-for="tag in previewProject.heroTags" :key="tag">{{ tag }}</b>
+                    </div>
+                  </section>
+                  <nav class="commerce-categories">
+                    <button v-for="category in previewProject.categories" :key="category" type="button">{{ category }}</button>
+                  </nav>
+                  <section class="commerce-products">
+                    <article v-for="product in previewProject.products" :key="product.name">
+                      <div><span>{{ product.tag }}</span></div>
+                      <small>{{ product.category }}</small>
+                      <h4>{{ product.name }}</h4>
+                      <p>{{ product.meta }}</p>
+                      <footer><strong>{{ product.price }}</strong><button type="button">购买</button></footer>
+                    </article>
+                  </section>
+                  <footer class="commerce-tabbar">
+                    <button v-for="tab in previewProject.tabs" :key="tab" type="button">{{ tab }}</button>
+                  </footer>
+                </div>
+                <template v-else>
+                  <div class="preview-hero">
+                    <small>{{ codeForm.stack.frontend }} · {{ codeForm.stack.backend }}</small>
+                    <h3>{{ previewProject.title }}</h3>
+                    <p>{{ previewProject.summary }}</p>
+                    <button type="button">{{ previewProject.cta }}</button>
+                  </div>
+                  <div class="preview-sections">
+                    <article v-for="(item, index) in previewProject.prd" :key="`file-preview-prd-${index}`">
+                      <span>{{ String(index + 1).padStart(2, '0') }}</span>
+                      <p>{{ item }}</p>
+                    </article>
+                  </div>
+                </template>
+              </div>
+            </div>
+            <pre v-if="selectedCodeFile && (!selectedCodeFileIsFrontend || codeFileViewMode === 'code')" class="code-file-preview"><code>{{ selectedCodeFile.content }}</code></pre>
+            <p v-if="!selectedCodeFile" class="empty-state">生成完成后可以在这里查看代码文件。</p>
           </div>
-          <div class="code-file-tabs">
-            <button v-for="file in codeFiles" :key="file.path" type="button" :class="{ active: selectedCodeFile?.path === file.path }" @click="selectedCodeFile = file">
-              {{ file.path }}
-            </button>
-          </div>
-          <p v-if="selectedCodeFile" class="code-file-explain">{{ selectedCodeFile.explanation }}</p>
-          <pre v-if="selectedCodeFile"><code>{{ selectedCodeFile.content }}</code></pre>
-          <p v-else class="empty-state">生成完成后可以在这里查看代码文件。</p>
         </div>
 
         <form class="github-panel" @submit.prevent="pushGeneratedCode">
@@ -475,6 +617,7 @@ const codeNodes = ref([])
 const codeEdges = ref([])
 const selectedCodeFile = ref(null)
 const selectedCodeNode = ref(null)
+const codeFileViewMode = ref('code')
 const githubConfig = ref(null)
 const githubForm = ref({ token: '', default_repo: '', default_branch: 'main' })
 
@@ -498,6 +641,52 @@ const canPublishCommunity = computed(() => {
 
 const selectedPrd = computed(() => prdItems.value.find((item) => String(item.id) === String(selectedPrdId.value)) || null)
 
+const selectedCodeFileIsFrontend = computed(() => isFrontendFile(selectedCodeFile.value))
+
+const previewProject = computed(() => {
+  const source = selectedPrd.value || {}
+  const targetLines = codeForm.value.target_description
+    .split('\n')
+    .map((line) => line.replace(/^(PRD|流程|任务)[:：]\s*/i, '').trim())
+    .filter(Boolean)
+  const sourcePrd = Array.isArray(source.prd) && source.prd.length ? source.prd : (prd.value.length ? prd.value : targetLines)
+  const sourceFlow = Array.isArray(source.flow) && source.flow.length ? source.flow : flow.value
+  const sourceTasks = Array.isArray(source.tasks) && source.tasks.length ? source.tasks : tasks.value
+  const title = source.title || codeForm.value.title || '未命名项目'
+  const summary = source.summary || sourcePrd[0] || '基于已确认需求生成可预览的前端页面。'
+  const contentText = [title, summary, ...sourcePrd, ...sourceFlow, ...sourceTasks].join(' ')
+  const isCommerce = /电商|商品|服装|价格|尺码|颜色|库存|购买|分类|banner|搜索|收藏|小程序/.test(contentText)
+
+  if (isCommerce) {
+    return {
+      pageType: 'commerce',
+      brand: '衣橱选品',
+      title: contentText.includes('服装') ? '春夏服装新品馆' : '精选商品快逛',
+      summary: '商品图片、价格、尺码、颜色和库存集中展示，支持分类浏览、搜索、收藏和购买引导。',
+      search: '搜索上衣、裙子、通勤风格',
+      heroTags: ['Banner轮播', '快捷分类', '新品推荐', '热卖商品'],
+      categories: ['上衣', '裤子', '裙子', '春夏', '秋冬', '休闲', '商务'],
+      products: [
+        { name: '轻盈通勤衬衫', category: '上衣', price: '¥199', meta: 'S-XL · 3色 · 有库存', tag: '新品' },
+        { name: '高腰垂感西裤', category: '裤子', price: '¥269', meta: 'XS-L · 黑/杏 · 少量库存', tag: '热卖' },
+        { name: '法式碎花半裙', category: '裙子', price: '¥229', meta: 'S-L · 春夏 · 可收藏', tag: '推荐' },
+        { name: '商务针织外套', category: '商务', price: '¥329', meta: 'M-XL · 2色 · 可联系商家', tag: '精选' }
+      ],
+      tabs: ['首页', '分类', '搜索', '收藏', '联系']
+    }
+  }
+
+  return {
+    pageType: 'product',
+    title,
+    summary,
+    cta: sourceFlow[0] || '开始体验',
+    prd: sourcePrd.slice(0, 6),
+    flow: sourceFlow.slice(0, 5),
+    tasks: sourceTasks.slice(0, 5)
+  }
+})
+
 onMounted(async () => {
   await loadProfile()
   await loadGitHubConfig()
@@ -506,6 +695,9 @@ onMounted(async () => {
 })
 
 watch(activeView, (value) => {
+  if (['prd', 'flow', 'tasks'].includes(value)) {
+    loadPrds()
+  }
   if (value === 'community' && !communityItems.value.length) loadCommunity()
   if (value === 'code') {
     loadPrds().then(fillCodeDraft)
@@ -556,15 +748,37 @@ async function loadPrds() {
     if (!selectedPrdId.value && prdItems.value.length) {
       selectedPrdId.value = String(prdItems.value[0].id)
     }
+    if (!prd.value.length && selectedPrd.value) {
+      applyPrdToWorkspace(selectedPrd.value)
+    }
   } catch {
     prdItems.value = []
   }
+}
+
+function applyPrdToWorkspace(item) {
+  if (!item) return
+  prd.value = item.prd || []
+  flow.value = item.flow || []
+  tasks.value = item.tasks || []
+}
+
+function selectPrdItem(item) {
+  selectedPrdId.value = String(item.id)
+  applyPrdToWorkspace(item)
+  applySelectedPrdToCodeForm(true)
 }
 
 function applyProfile(response) {
   user.value = response.user
   points.value = response.points
   aiConfig.value = response.ai_config
+}
+
+function cleanAssistantMessage(content) {
+  return String(content || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim()
 }
 
 async function saveConfig() {
@@ -608,7 +822,11 @@ async function sendMessage() {
     const response = await generatePlan(messages.value, conversationId.value)
     conversationId.value = response.conversation_id
     const result = response.result || {}
-    messages.value.push({ role: 'assistant', content: result.assistant_message || '我已经收到，可以继续补充更多细节。' })
+    messages.value.push({
+      role: 'assistant',
+      content: cleanAssistantMessage(result.assistant_message || '我已经收到，可以继续补充更多细节。'),
+      thinking: result.thinking || ''
+    })
     focusedMessageIndex.value = messages.value.length - 1
     if (Array.isArray(result.prd) && result.prd.length) {
       prd.value = result.prd
@@ -636,6 +854,7 @@ async function confirmRequirement() {
     conversationId.value = response.conversation_id
     selectedPrdId.value = String(response.conversation_id)
     await loadPrds()
+    applyPrdToWorkspace(selectedPrd.value)
     fillPublishDraft()
     fillCodeDraft()
   } catch (err) {
@@ -710,7 +929,7 @@ async function starCommunityItem(item) {
 }
 
 function fillCodeDraft() {
-  applySelectedPrdToCodeForm()
+  applySelectedPrdToCodeForm(true)
   const firstUserMessage = messages.value.find((message) => message.role === 'user')?.content || ''
   if (!codeForm.value.title) codeForm.value.title = firstUserMessage.slice(0, 32) || publishForm.value.title || '未命名项目'
   if (!codeForm.value.target_description) {
@@ -718,15 +937,16 @@ function fillCodeDraft() {
   }
 }
 
-function applySelectedPrdToCodeForm() {
+function applySelectedPrdToCodeForm(force = true) {
   const item = selectedPrd.value
   if (!item) return
-  codeForm.value.title = codeForm.value.title || item.title || '未命名项目'
-  codeForm.value.target_description = [
+  const target = [
     ...item.prd.map((line) => `PRD：${line}`),
     ...item.flow.map((line) => `流程：${line}`),
     ...item.tasks.map((line) => `任务：${line}`)
   ].join('\n')
+  if (force || !codeForm.value.title) codeForm.value.title = item.title || '未命名项目'
+  if (force || !codeForm.value.target_description) codeForm.value.target_description = target
 }
 
 async function startCodeGeneration() {
@@ -734,6 +954,7 @@ async function startCodeGeneration() {
     codeError.value = '请先选择一个已保存的 PRD'
     return
   }
+  applySelectedPrdToCodeForm(true)
   codeGenerating.value = true
   codeError.value = ''
   codeMessage.value = ''
@@ -761,13 +982,30 @@ function applyCodeJob(job) {
   codeFiles.value = job.files || []
   codeNodes.value = job.graph_nodes || []
   codeEdges.value = job.graph_edges || []
-  selectedCodeFile.value = codeFiles.value[0] || null
+  chooseCodeFile(codeFiles.value.find(isFrontendFile) || codeFiles.value[0] || null)
   selectedCodeNode.value = codeNodes.value[0] || null
+}
+
+function isFrontendFile(file) {
+  const path = file?.path || ''
+  return path.startsWith('frontend/') || /\.(vue|jsx|tsx|html)$/i.test(path)
+}
+
+function chooseCodeFile(file) {
+  selectedCodeFile.value = file
+  codeFileViewMode.value = isFrontendFile(file) ? 'preview' : 'code'
 }
 
 function nodePosition(key) {
   const node = codeNodes.value.find((item) => item.key === key)
   return node?.position || { x: 120, y: 120 }
+}
+
+function graphNodeStyle(key) {
+  const position = nodePosition(key)
+  const left = Math.min(94, Math.max(6, (position.x / 1000) * 100))
+  const top = Math.min(91, Math.max(9, (position.y / 390) * 100))
+  return { left: `${left}%`, top: `${top}%` }
 }
 
 function selectCodeNode(node) {
@@ -777,7 +1015,7 @@ function selectCodeNode(node) {
 
 function selectCodeFile(path) {
   const file = codeFiles.value.find((item) => item.path === path)
-  if (file) selectedCodeFile.value = file
+  if (file) chooseCodeFile(file)
 }
 
 async function saveGitHubSettings() {
@@ -815,6 +1053,21 @@ async function focusMessage(index) {
 function memoryTitle(message, index) {
   const speaker = message.role === 'user' ? '你' : 'Think Land'
   return `${index + 1}. ${speaker}: ${message.content.slice(0, 42)}`
+}
+
+function splitPrdLine(item) {
+  const text = String(item || '').trim()
+  const match = text.match(/^([^：:，,。.\n]{2,18})[：:，,。.]?\s*(.*)$/)
+  if (!match) return { title: '需求条目', body: text }
+  return { title: match[1], body: match[2] || text }
+}
+
+function prdTitle(item) {
+  return splitPrdLine(item).title
+}
+
+function prdBody(item) {
+  return splitPrdLine(item).body
 }
 
 function previewLines(item) {
