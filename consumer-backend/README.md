@@ -32,5 +32,5 @@ python -m venv .venv
 4. Start the API:
 
 ```bash
-.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
+.venv\Scripts\python -m uvicorn app.main:app --host 0.0.0.0 --port 18080
 ```

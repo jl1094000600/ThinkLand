@@ -10,6 +10,7 @@
           <a href="#product">产品</a>
           <a href="#motion">演示</a>
           <a href="#notice">说明</a>
+          <a href="/downloads/ThinkLand-Local-Studio-Setup-0.1.0.exe">下载本地工具</a>
         </div>
         <RouterLink class="nav-cta" to="/login">开始使用</RouterLink>
       </div>
@@ -51,6 +52,7 @@
           Think Land 面向个人创作者、独立开发者和小团队，把需求梳理、PRD 生成、流程图规划和任务拆解放进一个轻量工作台。
         </p>
         <div class="hero-actions">
+          <a class="primary-btn" href="/downloads/ThinkLand-Local-Studio-Setup-0.1.0.exe">下载本地创作工具</a>
           <button class="secondary-btn" @click="openDemo">查看生成动画</button>
         </div>
       </div>
